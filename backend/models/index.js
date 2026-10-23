@@ -1,0 +1,17 @@
+module.exports = {
+  UserModel: require('./userModel'),
+  RefreshTokenModel: require('./refreshTokenModel'),
+  StudentModel: require('./studentModel'),
+  TeacherModel: require('./teacherModel'),
+  ClassModel: require('./classModel'),
+  AttendanceModel: require('./attendanceModel'),
+  StudentDetailModel: require('./studentDetailModel'),
+  TeacherDetailModel: require('./teacherDetailModel'),
+  InviteModel: require('./inviteModel'),
+  NoticeModel: require('./noticeModel'),
+  HomeworkModel: require('./homeworkModel'),
+  ExamModel: require('./examModel'),
+  FeeModel: require('./feeModel'),
+  LibraryModel: require('./libraryModel'),
+  AuditModel: require('./auditModel'),
+};

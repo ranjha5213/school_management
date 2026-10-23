@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.db
+*.db-shm
+*.db-wal
+.env
+logs/
+uploads/
+backups/
+frontend/src/*.ts.net.*

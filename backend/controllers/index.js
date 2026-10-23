@@ -1,0 +1,17 @@
+module.exports = {
+  authController: require('./authController'),
+  studentController: require('./studentController'),
+  teacherController: require('./teacherController'),
+  classController: require('./classController'),
+  attendanceController: require('./attendanceController'),
+  examController: require('./examController'),
+  homeworkController: require('./homeworkController'),
+  feeController: require('./feeController'),
+  libraryController: require('./libraryController'),
+  noticeController: require('./noticeController'),
+  timetableController: require('./timetableController'),
+  reportController: require('./reportController'),
+  auditController: require('./auditController'),
+  parentController: require('./parentController'),
+  searchController: require('./searchController'),
+};
