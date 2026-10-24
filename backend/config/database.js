@@ -29,4 +29,13 @@ const all = (sql, params = []) =>
     db.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows)));
   });
 
-module.exports = { db, run, get, all };
+const close = () =>
+  new Promise((resolve, reject) => {
+    db.close((err) => {
+      if (err) return reject(err);
+      resolve();
+    });
+  });
+
+module.exports = { db, run, get, all, close };
+
