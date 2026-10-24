@@ -26,10 +26,16 @@ const getExam = async (req, res, next) => {
     const id = Number(req.params.id);
     const exam = await McqModel.findExam(id);
     if (!exam) return apiResponse(res, 404, false, 'MCQ exam not found');
-    const [questions, submissions] = await Promise.all([
-      McqModel.listQuestions(id),
-      McqModel.listSubmissions(id),
-    ]);
+
+    const isStudent = req.user && req.user.role === 'student';
+    const questions = isStudent
+      ? await McqModel.questionsWithoutAnswers(id)
+      : await McqModel.listQuestions(id);
+
+    const submissions = (!isStudent)
+      ? await McqModel.listSubmissions(id)
+      : [];
+
     return apiResponse(res, 200, true, 'MCQ exam', { exam, questions, submissions });
   } catch (e) { next(e); }
 };
