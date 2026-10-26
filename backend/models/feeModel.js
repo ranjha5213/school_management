@@ -1,5 +1,9 @@
 const { run, get, all } = require('../config/database');
 
+// Money helpers: API uses PKR (decimal), DB stores cents (integer)
+const toCents = (v) => (v == null ? 0 : Math.round(Number(v) * 100));
+const toPkr   = (c) => (c == null ? 0 : c / 100);
+
 const FeeModel = {
   // ─── Invoices ───
   listInvoices: (filters = {}) => {
@@ -7,7 +11,8 @@ const FeeModel = {
       SELECT i.*,
              u.name AS student_name, s.admission_number, s.roll_number,
              sec.section_name, c.class_name,
-             (SELECT COALESCE(SUM(p.amount_paid), 0) FROM payments p WHERE p.invoice_id = i.id) AS paid_amount
+             (SELECT COALESCE(SUM(p.amount_paid_cents), 0)
+                FROM payments p WHERE p.invoice_id = i.id) AS paid_cents
       FROM invoices i
       JOIN students s ON i.student_id = s.id
       JOIN users u ON s.user_id = u.id
@@ -20,7 +25,16 @@ const FeeModel = {
     if (filters.status)     { where.push('i.status = ?');     params.push(filters.status); }
     if (where.length) sql += ' WHERE ' + where.join(' AND ');
     sql += ' ORDER BY i.created_at DESC LIMIT 500';
-    return all(sql, params);
+
+    return all(sql, params).then((rows) =>
+      rows.map((r) => ({
+        ...r,
+        amount:       toPkr(r.amount_cents),
+        total_amount: toPkr(r.total_cents),
+        paid_amount:  toPkr(r.paid_cents),
+        balance:      toPkr((r.total_cents || 0) - (r.paid_cents || 0)),
+      }))
+    );
   },
 
   findInvoice: (id) =>
@@ -28,7 +42,8 @@ const FeeModel = {
       `SELECT i.*,
               u.name AS student_name, s.admission_number, s.roll_number,
               sec.section_name, c.class_name,
-              (SELECT COALESCE(SUM(p.amount_paid), 0) FROM payments p WHERE p.invoice_id = i.id) AS paid_amount
+              (SELECT COALESCE(SUM(p.amount_paid_cents), 0)
+                 FROM payments p WHERE p.invoice_id = i.id) AS paid_cents
        FROM invoices i
        JOIN students s ON i.student_id = s.id
        JOIN users u ON s.user_id = u.id
@@ -36,22 +51,35 @@ const FeeModel = {
        LEFT JOIN classes c ON sec.class_id = c.id
        WHERE i.id = ?`,
       [id]
-    ),
+    ).then((r) => r ? {
+      ...r,
+      amount:       toPkr(r.amount_cents),
+      total_amount: toPkr(r.total_cents),
+      paid_amount:  toPkr(r.paid_cents),
+      balance:      toPkr((r.total_cents || 0) - (r.paid_cents || 0)),
+    } : null),
 
+  // Accepts `amount` in PKR, stores in cents
   createInvoice: ({ student_id, amount, due_date = null, status = 'unpaid',
                     invoice_number = null, description = null }) =>
     run(
-      `INSERT INTO invoices (student_id, invoice_number, amount, total_amount, due_date, status)
+      `INSERT INTO invoices
+         (student_id, invoice_number, amount_cents, total_cents, due_date, status)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [student_id, invoice_number, amount, amount, due_date, status]
+      [student_id, invoice_number, toCents(amount), toCents(amount), due_date, status]
     ),
 
+  // Accepts `amount` / `total_amount` in PKR, stores in cents
   updateInvoice: (id, patch) => {
-    const allowed = ['amount', 'total_amount', 'due_date', 'status', 'invoice_number'];
-    const keys = allowed.filter((k) => k in patch);
+    const clean = { ...patch };
+    if (clean.amount != null)       { clean.amount_cents = toCents(clean.amount); delete clean.amount; }
+    if (clean.total_amount != null) { clean.total_cents  = toCents(clean.total_amount); delete clean.total_amount; }
+
+    const allowed = ['amount_cents', 'total_cents', 'due_date', 'status', 'invoice_number'];
+    const keys = allowed.filter((k) => k in clean);
     if (!keys.length) return Promise.resolve({ changes: 0 });
     const sql = `UPDATE invoices SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`;
-    return run(sql, [...keys.map((k) => patch[k]), id]);
+    return run(sql, [...keys.map((k) => clean[k]), id]);
   },
 
   removeInvoice: (id) => run(`DELETE FROM invoices WHERE id = ?`, [id]),
@@ -65,13 +93,18 @@ const FeeModel = {
        WHERE p.invoice_id = ?
        ORDER BY p.paid_at DESC`,
       [invoice_id]
-    ),
+    ).then((rows) => rows.map((r) => ({
+      ...r,
+      amount_paid: toPkr(r.amount_paid_cents),
+    }))),
 
+  // Accepts `amount_paid` in PKR, stores in cents
   recordPayment: ({ invoice_id, amount_paid, payment_method, paid_by, notes = null }) =>
     run(
-      `INSERT INTO payments (invoice_id, amount_paid, payment_method, paid_by, notes)
+      `INSERT INTO payments
+         (invoice_id, amount_paid_cents, payment_method, paid_by, notes)
        VALUES (?, ?, ?, ?, ?)`,
-      [invoice_id, amount_paid, payment_method, paid_by, notes]
+      [invoice_id, toCents(amount_paid), payment_method, paid_by, notes]
     ),
 
   // Recompute invoice status based on payments
@@ -87,7 +120,7 @@ const FeeModel = {
     return status;
   },
 
-  // ─── Summary ───
+  // ─── Summary (returns PKR) ───
   summary: () =>
     get(
       `SELECT
@@ -95,10 +128,15 @@ const FeeModel = {
          SUM(CASE WHEN status='paid' THEN 1 ELSE 0 END) AS paid_count,
          SUM(CASE WHEN status='unpaid' THEN 1 ELSE 0 END) AS unpaid_count,
          SUM(CASE WHEN status='partial' THEN 1 ELSE 0 END) AS partial_count,
-         COALESCE(SUM(total_amount), 0) AS total_billed,
-         COALESCE((SELECT SUM(amount_paid) FROM payments), 0) AS total_paid
+         COALESCE(SUM(total_cents), 0) AS total_billed_cents,
+         COALESCE((SELECT SUM(amount_paid_cents) FROM payments), 0) AS total_paid_cents
        FROM invoices`
-    ),
+    ).then((r) => ({
+      ...r,
+      total_billed: toPkr(r.total_billed_cents),
+      total_paid:   toPkr(r.total_paid_cents),
+      balance:      toPkr((r.total_billed_cents || 0) - (r.total_paid_cents || 0)),
+    })),
 };
 
 module.exports = FeeModel;

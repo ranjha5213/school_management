@@ -26,12 +26,12 @@ const StudentDetailModel = {
               h.attachment_url, h.created_at,
               hs.submission_date, hs.attachment_url AS submitted_file,
               hs.remarks AS submission_remarks,
-              sub.subject_name
+              subj.subject_name
        FROM homework h
-       JOIN sections sec ON h.class_id = sec.class_id
+       JOIN subjects subj ON h.subject_id = subj.id
+       JOIN sections sec ON subj.class_id = sec.class_id
        JOIN students s ON s.section_id = sec.id AND s.id = ?
        LEFT JOIN homework_submissions hs ON hs.homework_id = h.id AND hs.student_id = s.id
-       LEFT JOIN subjects sub ON h.subject_id = sub.id
        ORDER BY h.due_date DESC LIMIT 200`,
       [student_id]
     ).catch(() => []),
@@ -41,7 +41,7 @@ const StudentDetailModel = {
       `SELECT em.id, em.marks_obtained, em.total_marks, em.remarks,
               em.entered_at,
               e.exam_name, e.start_date, e.end_date,
-              sub.subject_name, et.type_name
+              subj.subject_name, et.type_name
        FROM exam_marks em
        JOIN exams e ON em.exam_id = e.id
        LEFT JOIN exam_types et ON e.exam_type_id = et.id

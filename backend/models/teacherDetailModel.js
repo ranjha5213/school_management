@@ -41,7 +41,7 @@ const TeacherDetailModel = {
       `SELECT h.*, sub.subject_name, c.class_name
        FROM homework h
        LEFT JOIN subjects sub ON h.subject_id = sub.id
-       LEFT JOIN classes c ON h.class_id = c.id
+       LEFT JOIN classes c ON sub.class_id = c.id
        WHERE h.teacher_id = ?
        ORDER BY h.created_at DESC LIMIT 200`,
       [teacher_id]

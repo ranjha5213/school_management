@@ -1,26 +1,26 @@
 const { run, get, all } = require('../config/database');
 
 const HomeworkModel = {
-  // ─── List with teacher name + class + subject ───
   list: (filters = {}) => {
     let sql = `
       SELECT h.*,
              sub.subject_name,
+             sub.class_id,
              c.class_name, c.class_code,
              tu.name AS teacher_name,
              uu.name AS updated_by_name
       FROM homework h
       LEFT JOIN subjects sub ON h.subject_id = sub.id
-      LEFT JOIN classes c ON h.class_id = c.id
+      LEFT JOIN classes c ON sub.class_id = c.id
       LEFT JOIN teachers t ON h.teacher_id = t.id
       LEFT JOIN users tu ON t.user_id = tu.id
       LEFT JOIN users uu ON h.updated_by = uu.id
     `;
     const where = [];
     const params = [];
-    if (filters.class_id)   { where.push('h.class_id = ?');   params.push(filters.class_id); }
-    if (filters.teacher_id) { where.push('h.teacher_id = ?'); params.push(filters.teacher_id); }
-    if (filters.subject_id) { where.push('h.subject_id = ?'); params.push(filters.subject_id); }
+    if (filters.class_id)   { where.push('sub.class_id = ?');   params.push(filters.class_id); }
+    if (filters.teacher_id) { where.push('h.teacher_id = ?');   params.push(filters.teacher_id); }
+    if (filters.subject_id) { where.push('h.subject_id = ?');   params.push(filters.subject_id); }
     if (filters.q)          { where.push('(h.title LIKE ? OR h.description LIKE ?)');
                               params.push(`%${filters.q}%`, `%${filters.q}%`); }
     if (where.length) sql += ' WHERE ' + where.join(' AND ');
@@ -32,12 +32,13 @@ const HomeworkModel = {
     get(
       `SELECT h.*,
               sub.subject_name,
+              sub.class_id,
               c.class_name, c.class_code,
               tu.name AS teacher_name,
               uu.name AS updated_by_name
        FROM homework h
        LEFT JOIN subjects sub ON h.subject_id = sub.id
-       LEFT JOIN classes c ON h.class_id = c.id
+       LEFT JOIN classes c ON sub.class_id = c.id
        LEFT JOIN teachers t ON h.teacher_id = t.id
        LEFT JOIN users tu ON t.user_id = tu.id
        LEFT JOIN users uu ON h.updated_by = uu.id
@@ -45,19 +46,18 @@ const HomeworkModel = {
       [id]
     ),
 
-  // ─── Write ───
-  create: ({ class_id, subject_id, teacher_id = null,
+  create: ({ subject_id, teacher_id = null,
              title, description = null, due_date,
              attachment_url = null }) =>
     run(
       `INSERT INTO homework
-        (class_id, subject_id, teacher_id, title, description, due_date, attachment_url)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [class_id, subject_id, teacher_id, title, description, due_date, attachment_url]
+        (subject_id, teacher_id, title, description, due_date, attachment_url)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [subject_id, teacher_id, title, description, due_date, attachment_url]
     ),
 
   update: (id, patch, updated_by) => {
-    const allowed = ['class_id', 'subject_id', 'teacher_id',
+    const allowed = ['subject_id', 'teacher_id',
                      'title', 'description', 'due_date', 'attachment_url'];
     const keys = allowed.filter((k) => k in patch);
     if (!keys.length) return Promise.resolve({ changes: 0 });
@@ -68,7 +68,6 @@ const HomeworkModel = {
 
   remove: (id) => run(`DELETE FROM homework WHERE id = ?`, [id]),
 
-  // ─── Submissions ───
   submissionsFor: (homework_id) =>
     all(
       `SELECT hs.*,
@@ -103,7 +102,6 @@ const HomeworkModel = {
       [grade, remarks || null, graded_by, homework_id, student_id]
     ),
 
-  // ─── Students in the homework's class (for submission tracking) ───
   studentsInClass: (class_id) =>
     all(
       `SELECT s.id, u.name AS student_name, s.roll_number, s.admission_number,

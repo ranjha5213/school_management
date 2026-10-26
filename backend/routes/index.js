@@ -22,4 +22,5 @@ router.use('/users',        require('./users'));
 router.use('/settings',     require('./settings'));
 router.use('/materials',    require('./materials'));
 
+router.use('/subjects', require('./subjects'));
 module.exports = router;

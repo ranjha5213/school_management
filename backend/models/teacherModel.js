@@ -5,7 +5,7 @@ const TeacherModel = {
   list: () =>
     all(
       `SELECT t.id, t.employee_code, t.department_id, t.qualification,
-              t.join_date, t.salary, t.created_at,
+              t.join_date, t.salary_cents, t.created_at,
               u.id AS user_id, u.name, u.email, u.phone, u.avatar_url, u.status,
               d.department_name
        FROM teachers t
@@ -36,19 +36,28 @@ const TeacherModel = {
     ),
 
   // ─── Write ───
+  // Inputs: salary is PKR (decimal), stored as salary_cents (integer)
   create: ({ user_id, employee_code, department_id = null,
-             qualification = null, join_date = null, salary = null }) =>
-    run(
-      `INSERT INTO teachers (user_id, employee_code, department_id, qualification, join_date, salary)
+             qualification = null, join_date = null, salary = null }) => {
+    const salary_cents = salary == null ? 0 : Math.round(Number(salary) * 100);
+    return run(
+      `INSERT INTO teachers (user_id, employee_code, department_id, qualification, join_date, salary_cents)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [user_id, employee_code, department_id, qualification, join_date, salary]
-    ),
+      [user_id, employee_code, department_id, qualification, join_date, salary_cents]
+    );
+  },
 
   update: (id, patch) => {
-    const keys = Object.keys(patch);
+    // Translate salary (PKR) → salary_cents if present
+    const clean = { ...patch };
+    if (clean.salary != null) {
+      clean.salary_cents = Math.round(Number(clean.salary) * 100);
+      delete clean.salary;
+    }
+    const keys = Object.keys(clean);
     if (!keys.length) return Promise.resolve({ changes: 0 });
     const sql = `UPDATE teachers SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`;
-    return run(sql, [...keys.map((k) => patch[k]), id]);
+    return run(sql, [...keys.map((k) => clean[k]), id]);
   },
 
   remove: (id) => run(`DELETE FROM teachers WHERE id = ?`, [id]),

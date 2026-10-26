@@ -1,0 +1,44 @@
+# Secrets and environment
+.env
+.env.*
+!.env.example
+
+# Database (local only)
+*.db
+*.db-wal
+*.db-shm
+*.db.bak
+*.db.backup*
+*.sqlite
+*.sqlite3
+
+# Seed with real hash (never commit)
+seed.sql
+
+# Editor / temp files
+*.bak
+*.save
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Uploads (user content)
+uploads/
+!uploads/.gitkeep
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Build artifacts
+dist/
+build/
+
+# Test coverage
+coverage/
+.nyc_output/
