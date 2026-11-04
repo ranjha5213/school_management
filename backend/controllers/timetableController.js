@@ -1,6 +1,7 @@
 // controllers/timetableController.js
 const TimetableModel = require('../models/timetableModel');
 const ClassModel     = require('../models/classModel');
+const SubjectModel   = require('../models/subjectModel');
 const ApprovalModel  = require('../models/approvalModel');
 const { apiResponse } = require('../utils/helpers');
 const logger          = require('../utils/logger');
@@ -55,6 +56,16 @@ const _validateTimetableChange = async ({
 
   const sec = await ClassModel.findSection(Number(section_id));
   if (!sec) return { ok: false, msg: 'Section not found' };
+
+  // ── Subject must belong to the section's class (or be class-agnostic) ──
+  const subject = await SubjectModel.findById(Number(subject_id));
+  if (!subject) return { ok: false, msg: 'Subject not found' };
+  if (subject.class_id && subject.class_id !== sec.class_id) {
+    return {
+      ok: false,
+      msg: `Subject "${subject.subject_name}" belongs to a different class`,
+    };
+  }
 
   const secConflict = await TimetableModel.sectionConflict({
     section_id: Number(section_id), day_of_week: day,
