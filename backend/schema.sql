@@ -12,7 +12,7 @@ CREATE TABLE users (
     phone            VARCHAR(20),
     avatar_url       VARCHAR(255),
     status           VARCHAR(20)  NOT NULL DEFAULT 'active'
-                     CHECK (status IN ('active','pending','rejected','suspended')),
+                     CHECK (status IN ('active','pending','unverified','rejected','suspended')),
     approved_by      INTEGER      REFERENCES users(id) ON DELETE SET NULL,
     approved_at      DATETIME,
     rejection_reason VARCHAR(255),
@@ -126,7 +126,9 @@ CREATE TABLE subjects (
     subject_name VARCHAR(100) NOT NULL,
     subject_code VARCHAR(20)  UNIQUE,
     class_id     INTEGER      REFERENCES classes(id) ON DELETE SET NULL,
-    created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- prevents two "Math" rows for the same class
+    UNIQUE (class_id, subject_name)
 );
 CREATE INDEX idx_subjects_class ON subjects(class_id);
 
@@ -245,7 +247,7 @@ CREATE TABLE exam_types (
 CREATE TABLE exams (
     id               INTEGER      PRIMARY KEY AUTOINCREMENT,
     exam_name        VARCHAR(100) NOT NULL,
-    exam_type_id     INTEGER      REFERENCES exam_types(id)    ON DELETE SET NULL,
+    exam_type_id     INTEGER      REFERENCES exam_types(id)     ON DELETE SET NULL,
     academic_year_id INTEGER      REFERENCES academic_years(id) ON DELETE CASCADE,
     class_id         INTEGER      REFERENCES classes(id)        ON DELETE CASCADE,
     start_date       DATE,
@@ -552,3 +554,48 @@ CREATE TABLE system_settings (
     description   VARCHAR(255),
     updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ─── updated_at TRIGGERS ─────────────────────────────────────
+-- Keeps updated_at current on tables that carry it. Without these,
+-- updated_at is only set if the caller remembers to set it manually,
+-- which is fragile and easy to miss in a refactor.
+
+CREATE TRIGGER trg_users_updated_at
+AFTER UPDATE ON users
+FOR EACH ROW
+WHEN NEW.updated_at IS OLD.updated_at OR NEW.updated_at IS NULL
+BEGIN
+    UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER trg_students_updated_at
+AFTER UPDATE ON students
+FOR EACH ROW
+WHEN NEW.updated_at IS OLD.updated_at OR NEW.updated_at IS NULL
+BEGIN
+    UPDATE students SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER trg_teachers_updated_at
+AFTER UPDATE ON teachers
+FOR EACH ROW
+WHEN NEW.updated_at IS OLD.updated_at OR NEW.updated_at IS NULL
+BEGIN
+    UPDATE teachers SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER trg_homework_updated_at
+AFTER UPDATE ON homework
+FOR EACH ROW
+WHEN NEW.updated_at IS OLD.updated_at OR NEW.updated_at IS NULL
+BEGIN
+    UPDATE homework SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER trg_system_settings_updated_at
+AFTER UPDATE ON system_settings
+FOR EACH ROW
+WHEN NEW.updated_at IS OLD.updated_at OR NEW.updated_at IS NULL
+BEGIN
+    UPDATE system_settings SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
