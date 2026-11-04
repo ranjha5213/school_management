@@ -1,4 +1,22 @@
+// models/timetableModel.js
 const { run, get, all } = require('../config/database');
+
+// ─── Day-of-week normalizer ───
+// DB CHECK constraint only accepts lowercase full words:
+//   'monday','tuesday','wednesday','thursday','friday','saturday','sunday'
+// Accepts 'Monday', 'MON', 'mon', 'tue', 'Wed', etc. and returns the canonical form.
+const DAY_ALIASES = {
+  mon: 'monday', tue: 'tuesday', wed: 'wednesday',
+  thu: 'thursday', fri: 'friday', sat: 'saturday', sun: 'sunday',
+  monday: 'monday', tuesday: 'tuesday', wednesday: 'wednesday',
+  thursday: 'thursday', friday: 'friday', saturday: 'saturday', sunday: 'sunday',
+};
+
+const normalizeDay = (d) => {
+  if (d == null) return d;
+  const key = String(d).trim().toLowerCase();
+  return DAY_ALIASES[key] || key;
+};
 
 const TimetableModel = {
   // ─── Read ───
@@ -18,15 +36,24 @@ const TimetableModel = {
     `;
     const where = [];
     const params = [];
+
     if (filters.section_id) { where.push('t.section_id = ?'); params.push(filters.section_id); }
     if (filters.teacher_id) { where.push('t.teacher_id = ?'); params.push(filters.teacher_id); }
     if (filters.class_id)   { where.push('c.id = ?');         params.push(filters.class_id); }
-    if (filters.day)        { where.push('t.day_of_week = ?'); params.push(filters.day); }
+    if (filters.day)        { where.push('LOWER(t.day_of_week) = ?'); params.push(normalizeDay(filters.day)); }
+
     if (where.length) sql += ' WHERE ' + where.join(' AND ');
-    sql += ` ORDER BY CASE t.day_of_week
-        WHEN 'Monday' THEN 1 WHEN 'Tuesday' THEN 2 WHEN 'Wednesday' THEN 3
-        WHEN 'Thursday' THEN 4 WHEN 'Friday' THEN 5 WHEN 'Saturday' THEN 6
-        ELSE 7 END, t.start_time`;
+
+    sql += ` ORDER BY CASE LOWER(t.day_of_week)
+        WHEN 'monday'    THEN 1
+        WHEN 'tuesday'   THEN 2
+        WHEN 'wednesday' THEN 3
+        WHEN 'thursday'  THEN 4
+        WHEN 'friday'    THEN 5
+        WHEN 'saturday'  THEN 6
+        WHEN 'sunday'    THEN 7
+        ELSE 8 END, t.start_time`;
+
     return all(sql, params);
   },
 
@@ -47,18 +74,16 @@ const TimetableModel = {
     ),
 
   // ─── Conflict detection ───
-  // Same section + same day + overlapping time
   sectionConflict: ({ section_id, day_of_week, start_time, end_time, except_id = null }) =>
     get(
       `SELECT id, start_time, end_time
        FROM timetables
-       WHERE section_id = ? AND day_of_week = ? AND is_active = 1
+       WHERE section_id = ? AND LOWER(day_of_week) = ? AND is_active = 1
          AND (? IS NULL OR id != ?)
          AND (start_time < ? AND end_time > ?)`,
-      [section_id, day_of_week, except_id, except_id, end_time, start_time]
+      [section_id, normalizeDay(day_of_week), except_id, except_id, end_time, start_time]
     ),
 
-  // Same teacher + same day + overlapping time
   teacherConflict: ({ teacher_id, day_of_week, start_time, end_time, except_id = null }) => {
     if (!teacher_id) return Promise.resolve(null);
     return get(
@@ -66,21 +91,22 @@ const TimetableModel = {
        FROM timetables t
        LEFT JOIN sections sec ON t.section_id = sec.id
        LEFT JOIN classes c ON sec.class_id = c.id
-       WHERE t.teacher_id = ? AND t.day_of_week = ? AND t.is_active = 1
+       WHERE t.teacher_id = ? AND LOWER(t.day_of_week) = ? AND t.is_active = 1
          AND (? IS NULL OR t.id != ?)
          AND (t.start_time < ? AND t.end_time > ?)`,
-      [teacher_id, day_of_week, except_id, except_id, end_time, start_time]
+      [teacher_id, normalizeDay(day_of_week), except_id, except_id, end_time, start_time]
     );
   },
 
   // ─── Write ───
   create: ({ section_id, subject_id, teacher_id = null, day_of_week,
-             start_time, end_time, room_number = null }) =>
+             start_time, end_time }) =>
     run(
       `INSERT INTO timetables
          (section_id, subject_id, teacher_id, day_of_week, start_time, end_time, is_active)
        VALUES (?, ?, ?, ?, ?, ?, 1)`,
-      [section_id, subject_id, teacher_id, day_of_week, start_time, end_time]
+      [section_id, subject_id, teacher_id,
+       normalizeDay(day_of_week), start_time, end_time]
     ),
 
   update: (id, patch) => {
@@ -88,8 +114,12 @@ const TimetableModel = {
                      'day_of_week', 'start_time', 'end_time', 'is_active'];
     const keys = allowed.filter((k) => k in patch);
     if (!keys.length) return Promise.resolve({ changes: 0 });
+
+    const values = keys.map((k) =>
+      k === 'day_of_week' ? normalizeDay(patch[k]) : patch[k]
+    );
     const sql = `UPDATE timetables SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`;
-    return run(sql, [...keys.map((k) => patch[k]), id]);
+    return run(sql, [...values, id]);
   },
 
   remove: (id) => run(`DELETE FROM timetables WHERE id = ?`, [id]),
@@ -124,7 +154,15 @@ const TimetableModel = {
        LEFT JOIN teachers te ON t.teacher_id = te.id
        LEFT JOIN users u ON te.user_id = u.id
        WHERE t.section_id = ? AND t.is_active = 1
-       ORDER BY t.start_time`,
+       ORDER BY CASE LOWER(t.day_of_week)
+        WHEN 'monday'    THEN 1
+        WHEN 'tuesday'   THEN 2
+        WHEN 'wednesday' THEN 3
+        WHEN 'thursday'  THEN 4
+        WHEN 'friday'    THEN 5
+        WHEN 'saturday'  THEN 6
+        WHEN 'sunday'    THEN 7
+        ELSE 8 END, t.start_time`,
       [section_id]
     ),
 };
