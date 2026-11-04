@@ -200,6 +200,10 @@ updateExamSchedule: (id, body) => unwrap(client.patch(`/mcq/${id}/schedule`, bod
     unwrap(client.delete(`/mcq/submissions/${submissionId}`)),
 
   // ─── In-app attempts (Stage 5) ───
+  studentExamView: (examId) => unwrap(client.get(`/mcq/${examId}/student-view`)),
+  myExams: () => unwrap(client.get('/mcq/my-exams')),
+  myAttempts: () => unwrap(client.get('/mcq/my-attempts')),
+
   startAttempt: (examId, access_code) =>
     unwrap(client.post(`/mcq/${examId}/attempt/start`, { access_code })),
   submitAttempt: (attemptId, answers) =>
@@ -215,7 +219,6 @@ updateExamSchedule: (id, body) => unwrap(client.patch(`/mcq/${id}/schedule`, bod
       headers: { 'Content-Type': 'multipart/form-data' },
     }));
   },
-  myAttempts: () => unwrap(client.get('/mcq/my-attempts')),
   listExamAttempts: (examId) => unwrap(client.get(`/mcq/${examId}/attempts`)),
   attemptDetail: (attemptId) => unwrap(client.get(`/mcq/attempts/${attemptId}`)),
   reviewAttempt: (attemptId, p) =>

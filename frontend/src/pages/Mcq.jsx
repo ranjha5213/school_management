@@ -17,6 +17,7 @@ import BulkImportModal from '../components/BulkImportModal';
 import McqPublishModal from '../components/McqPublishModal';
 import { mcqApi, classesApi, studentsApi } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
+import StudentExams from './StudentExams';
 
 export default function Mcq() {
   const { examId } = useParams();
@@ -30,6 +31,8 @@ export default function Mcq() {
 function McqList() {
   const nav = useNavigate();
   const { user } = useAuth();
+  // Students see the exam list, not the staff scanner
+  if (user?.role === 'student') return <StudentExams />;
   const canWrite = ['admin', 'teacher'].includes(user?.role);
 
   const [rows, setRows] = useState([]);
