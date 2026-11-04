@@ -9,12 +9,34 @@ const { extractMcqSheet } = require('../utils/geminiClient');
 const { buildMcqSheet } = require('../utils/mcqPdfGenerator');
 const logger = require('../utils/logger');
 
+const toMs = (s) => {
+  if (!s) return null;
+  const iso = s.includes('T') ? s : String(s).replace(' ', 'T') + 'Z';
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? ms : null;
+};
+
+
+
 // ─── Exams ───
 const listExams = async (req, res, next) => {
   try {
     const rows = await McqModel.listExams();
-    if (req.user.role === 'student') {
-      const visible = rows.filter((e) => e.is_published === 1);
+    if (req.user && req.user.role === 'student') {
+      // Only currently-open exams, and only fields a student may see.
+      const visible = rows
+        .filter((e) => e.is_published === 1
+                    && e.schedule_state === 'open'
+                    && e.scheduled_start_at && e.scheduled_end_at)
+        .map((e) => ({
+          id: e.id,
+          title: e.title,
+          subject_name: e.subject_name || null,
+          total_questions: e.total_questions,
+          scheduled_start_at: e.scheduled_start_at,
+          scheduled_end_at:   e.scheduled_end_at,
+          time_limit_minutes: e.time_limit_minutes,
+        }));
       return apiResponse(res, 200, true, 'MCQ exams', visible);
     }
     return apiResponse(res, 200, true, 'MCQ exams', rows);
@@ -23,18 +45,18 @@ const listExams = async (req, res, next) => {
 
 const getExam = async (req, res, next) => {
   try {
+    // Students must never read an exam via this endpoint.
+    // All student access flows through /mcq/:id/student-view + attempt/start.
+    if (req.user && req.user.role === 'student') {
+      return apiResponse(res, 403, false, 'Forbidden');
+    }
+
     const id = Number(req.params.id);
     const exam = await McqModel.findExam(id);
     if (!exam) return apiResponse(res, 404, false, 'MCQ exam not found');
 
-    const isStudent = req.user && req.user.role === 'student';
-    const questions = isStudent
-      ? await McqModel.questionsWithoutAnswers(id)
-      : await McqModel.listQuestions(id);
-
-    const submissions = (!isStudent)
-      ? await McqModel.listSubmissions(id)
-      : [];
+    const questions = await McqModel.listQuestions(id);
+    const submissions = await McqModel.listSubmissions(id);
 
     return apiResponse(res, 200, true, 'MCQ exam', { exam, questions, submissions });
   } catch (e) { next(e); }
@@ -90,8 +112,8 @@ const updateExam = async (req, res, next) => {
         const startRaw = ('scheduled_start_at' in req.body) ? req.body.scheduled_start_at : exam.scheduled_start_at;
         const endRaw   = ('scheduled_end_at'   in req.body) ? req.body.scheduled_end_at   : exam.scheduled_end_at;
         if (!startRaw || !endRaw) return apiResponse(res, 400, false, 'Cannot publish without scheduled_start_at and scheduled_end_at');
-        const start = Date.parse(startRaw), end = Date.parse(endRaw);
-        if (Number.isNaN(start) || Number.isNaN(end)) return apiResponse(res, 400, false, 'scheduled_start_at / scheduled_end_at must be valid ISO timestamps');
+        const start = toMs(startRaw), end = toMs(endRaw);
+        if ((start === null) || (end === null)) return apiResponse(res, 400, false, 'scheduled_start_at / scheduled_end_at must be valid ISO timestamps');
         if (end <= start) return apiResponse(res, 400, false, 'scheduled_end_at must be after scheduled_start_at');
         const now = Date.now();
         if (now >= end) return apiResponse(res, 400, false, 'Exam window has already ended');
@@ -100,8 +122,8 @@ const updateExam = async (req, res, next) => {
         patch.schedule_state = (now < start) ? 'scheduled' : 'open';
       } else {
         const endRaw = ('scheduled_end_at' in req.body) ? req.body.scheduled_end_at : exam.scheduled_end_at;
-        const end = endRaw ? Date.parse(endRaw) : NaN;
-        patch.schedule_state = (!Number.isNaN(end) && Date.now() > end) ? 'closed' : 'draft';
+        const end = endRaw ? toMs(endRaw) : NaN;
+        patch.schedule_state = (!(end === null) && Date.now() > end) ? 'closed' : 'draft';
       }
     }
     if (!('is_published' in req.body) && ('scheduled_start_at' in req.body || 'scheduled_end_at' in req.body)) {
@@ -111,8 +133,8 @@ const updateExam = async (req, res, next) => {
       patch.scheduled_end_at   = endRaw || null;
       if (!startRaw || !endRaw) { patch.schedule_state = 'draft'; patch.is_published = 0; }
       else {
-        const start = Date.parse(startRaw), end = Date.parse(endRaw);
-        if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return apiResponse(res, 400, false, 'scheduled_end_at must be a valid timestamp after scheduled_start_at');
+        const start = toMs(startRaw), end = toMs(endRaw);
+        if ((start === null) || (end === null) || end <= start) return apiResponse(res, 400, false, 'scheduled_end_at must be a valid timestamp after scheduled_start_at');
         patch.schedule_state = 'scheduled';
         patch.is_published   = 0;
       }
@@ -143,9 +165,9 @@ const updateExamSchedule = async (req, res, next) => {
       return apiResponse(res, 400, false,
         'Both scheduled_start_at and scheduled_end_at are required (or both null to clear)');
     }
-    const start = Date.parse(scheduled_start_at);
-    const end   = Date.parse(scheduled_end_at);
-    if (Number.isNaN(start) || Number.isNaN(end)) {
+    const start = toMs(scheduled_start_at);
+    const end   = toMs(scheduled_end_at);
+    if ((start === null) || (end === null)) {
       return apiResponse(res, 400, false, 'Invalid ISO timestamp');
     }
     if (end <= start) {

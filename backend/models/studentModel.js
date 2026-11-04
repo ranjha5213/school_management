@@ -1,3 +1,4 @@
+// models/studentModel.js
 const { run, get, all } = require('../config/database');
 
 const StudentModel = {
@@ -17,7 +18,8 @@ const StudentModel = {
       [id]
     ),
 
-  findByUserId: (user_id) => get(`SELECT * FROM students WHERE user_id = ?`, [user_id]),
+  findByUserId: (user_id) =>
+    get(`SELECT * FROM students WHERE user_id = ?`, [user_id]),
 
   list: ({ section_id, class_id } = {}) => {
     let sql = `SELECT s.*, u.name AS student_name, u.email, sec.section_name, c.class_name

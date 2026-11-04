@@ -7,6 +7,18 @@ const logger           = require('../utils/logger');
 const fs               = require('fs');
 const path             = require('path');
 
+const toMs = (s) => {
+  if (!s) return null;
+  // SQLite's datetime('now') → "YYYY-MM-DD HH:MM:SS" in UTC.
+  // Add T + Z so Date.parse is spec-compliant and timezone-free.
+  const iso = s.includes('T') ? s : s.replace(' ', 'T') + 'Z';
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? ms : null;
+};
+
+const toIso = (s) => (s && !s.includes('T')) ? s.replace(' ', 'T') + 'Z' : s;
+
+
 const PROCTOR_DIR = path.join(__dirname, '..', 'uploads', 'proctoring');
 if (!fs.existsSync(PROCTOR_DIR)) fs.mkdirSync(PROCTOR_DIR, { recursive: true });
 
@@ -47,8 +59,8 @@ const startAttempt = async (req, res, next) => {
     if (!exam) return apiResponse(res, 404, false, 'MCQ exam not found');
     // ─── Schedule + publish-window enforcement ───
     const nowMs   = Date.now();
-    const startMs = exam.scheduled_start_at ? Date.parse(exam.scheduled_start_at) : null;
-    const endMs   = exam.scheduled_end_at   ? Date.parse(exam.scheduled_end_at)   : null;
+    const startMs = toMs(exam.scheduled_start_at);
+    const endMs   = toMs(exam.scheduled_end_at);
 
     if (exam.schedule_state !== 'open') {
       if (exam.schedule_state === 'scheduled' && startMs != null && nowMs < startMs) {
@@ -319,10 +331,99 @@ const myAttempts = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
+
+// ─── Student-facing helpers (countdown + safe metadata) ───
+const MS = 1000;
+
+const buildSafeExam = (exam) => ({
+  id: exam.id,
+  title: exam.title,
+  subject_name: exam.subject_name || null,
+  total_questions: exam.total_questions,
+  scheduled_start_at: toIso(exam.scheduled_start_at),
+  scheduled_end_at:   toIso(exam.scheduled_end_at),
+  time_limit_minutes: exam.time_limit_minutes,
+  proctoring_enabled: !!exam.proctoring_enabled,
+});
+
+const deriveState = (exam, attempt, nowMs) => {
+  const startMs = toMs(exam.scheduled_start_at);
+  const endMs   = toMs(exam.scheduled_end_at);
+  if (!startMs || !endMs) return { state: 'closed', startMs, endMs };
+  if (attempt) {
+    if (attempt.status === 'in_progress') return { state: 'in_progress', startMs, endMs };
+    return { state: 'submitted', startMs, endMs };
+  }
+  if (nowMs < startMs) return { state: 'waiting', startMs, endMs };
+  if (nowMs < endMs && exam.is_published && exam.schedule_state === 'open') {
+    return { state: 'open', startMs, endMs };
+  }
+  return { state: 'closed', startMs, endMs };
+};
+
+const viewPayload = (exam, attempt, nowMs) => {
+  const { state, startMs, endMs } = deriveState(exam, attempt, nowMs);
+  return {
+    success: true,
+    server_now: new Date(nowMs).toISOString(),
+    exam: buildSafeExam(exam),
+    state,
+    attempt_id: attempt ? attempt.id : null,
+    seconds_to_start: state === 'waiting' && startMs
+      ? Math.max(0, Math.ceil((startMs - nowMs) / MS)) : null,
+    seconds_to_end: (state === 'open' || state === 'in_progress') && endMs
+      ? Math.max(0, Math.ceil((endMs - nowMs) / MS)) : null,
+  };
+};
+
+const studentExamView = async (req, res, next) => {
+  try {
+    const exam = await McqModel.findExam(Number(req.params.id));
+    if (!exam) return apiResponse(res, 404, false, 'MCQ exam not found');
+
+    const student = await StudentModel.findByUserId(req.user.id);
+    if (!student) return apiResponse(res, 403, false, 'Not a student');
+
+    if (!exam.scheduled_start_at || !exam.scheduled_end_at) {
+      return apiResponse(res, 409, false, 'Exam not scheduled yet');
+    }
+    const attempt = await McqAttemptModel.findByExamAndStudent(exam.id, student.id);
+    return apiResponse(res, 200, true, 'Exam card', viewPayload(exam, attempt, Date.now()));
+  } catch (e) { next(e); }
+};
+
+const listMyExams = async (req, res, next) => {
+  try {
+    const student = await StudentModel.findByUserId(req.user.id);
+    if (!student) return apiResponse(res, 403, false, 'Not a student');
+
+    const rows = await McqModel.listExams();
+    const nowMs = Date.now();
+    const out = [];
+
+    for (const exam of rows) {
+      // Only exams relevant to this student's class (if class is known) and
+      // that are in some student-visible state.
+      if (exam.class_id && student.class_id && exam.class_id !== student.class_id) continue;
+      if (exam.section_id && student.section_id && exam.section_id !== student.section_id) continue;
+
+      const attempt = await McqAttemptModel.findByExamAndStudent(exam.id, student.id);
+      const view = viewPayload(exam, attempt, nowMs);
+      if (view.state === 'closed' && !attempt) continue;
+      out.push(view);
+    }
+
+    return apiResponse(res, 200, true, 'My exams',
+      { server_now: new Date(nowMs).toISOString(), exams: out });
+  } catch (e) { next(e); }
+};
+
 module.exports = {
   startAttempt, getMyAttempt,
   logProctorEvent, uploadSnapshot, uploadRecordingChunk, listRecordings,
   submitAttempt,
   listExamAttempts, getAttemptDetail, reviewAttempt, myAttempts,
   recUploadMiddleware: recUpload,
+  studentExamView,
+  listMyExams,
 };

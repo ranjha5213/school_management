@@ -226,24 +226,23 @@ const McqModel = {
       [examId]
     ),
 
- findExamsToOpen: (nowIso) =>
-  all(
-    `SELECT * FROM mcq_exams
-      WHERE schedule_state = 'scheduled'
-        AND scheduled_start_at IS NOT NULL
-        AND scheduled_end_at   IS NOT NULL
-        AND scheduled_start_at <= ?
-        AND scheduled_end_at   >  ?`,
-    [nowIso, nowIso]
-  ),
-  // FIX: findExamsToClose also picks up stuck rows (schedule_state='open'
-  // but is_published=0 should never happen, but if it does, close it).
+  findExamsToOpen: (nowIso) =>
+    all(
+      `SELECT * FROM mcq_exams
+        WHERE schedule_state = 'scheduled'
+          AND scheduled_start_at IS NOT NULL
+          AND scheduled_end_at   IS NOT NULL
+          AND datetime(scheduled_start_at) <= datetime(?)
+          AND datetime(scheduled_end_at)   >  datetime(?)`,
+      [nowIso, nowIso]
+    ),
+
   findExamsToClose: (nowIso) =>
     all(
       `SELECT * FROM mcq_exams
         WHERE schedule_state IN ('open', 'scheduled')
           AND scheduled_end_at IS NOT NULL
-          AND scheduled_end_at <= ?
+          AND datetime(scheduled_end_at) <= datetime(?)
           AND (is_published = 1 OR schedule_state = 'open')`,
       [nowIso]
     ),

@@ -28,6 +28,8 @@ const router = express.Router();
 router.use(authenticate);
 
 // ─── In-app attempts (registered BEFORE /:id to avoid capture) ───
+router.get('/my-exams',         authorize('student'), att.listMyExams);
+router.get('/:id/student-view',  authorize('student'), att.studentExamView);
 router.get('/my-attempts', authorize('student'), att.myAttempts);
 router.post('/:id/attempt/start', authorize('student'), att.startAttempt);
 router.get('/attempts/:attemptId',
@@ -52,9 +54,9 @@ router.post('/attempts/:attemptId/review',
   att.reviewAttempt);
 
 // ─── Exams CRUD ───
-router.get('/',    authorize('admin', 'teacher', 'student'), c.listExams);
+router.get('/', authorize('admin', 'teacher'), c.listExams);
 router.post('/',   authorize('admin', 'teacher'), c.createExam);
-router.get('/:id', authorize('admin', 'teacher', 'student'), c.getExam);
+router.get('/:id', authorize('admin', 'teacher'), c.getExam);
 router.patch('/:id', authorize('admin', 'teacher'), c.updateExam);
 router.delete('/:id', authorize('admin'), c.deleteExam);
 
