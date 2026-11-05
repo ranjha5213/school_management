@@ -25,13 +25,12 @@ CREATE INDEX idx_users_status ON users(status);
 CREATE TABLE refresh_tokens (
     id          INTEGER      PRIMARY KEY AUTOINCREMENT,
     user_id     INTEGER      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token_hash  VARCHAR(255) NOT NULL,
+    token_hash  VARCHAR(255) NOT NULL UNIQUE,
     expires_at  DATETIME     NOT NULL,
     revoked_at  DATETIME,
     created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_refresh_tokens_user   ON refresh_tokens(user_id);
-CREATE INDEX idx_refresh_tokens_hash   ON refresh_tokens(token_hash);
 CREATE INDEX idx_refresh_tokens_expiry ON refresh_tokens(expires_at);
 
 CREATE TABLE allowed_emails (
@@ -106,7 +105,7 @@ CREATE TABLE departments (
 
 CREATE TABLE classes (
     id         INTEGER      PRIMARY KEY AUTOINCREMENT,
-    class_name VARCHAR(50)  NOT NULL,
+    class_name VARCHAR(50)  NOT NULL UNIQUE,
     class_code VARCHAR(20)  UNIQUE,
     created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -127,7 +126,6 @@ CREATE TABLE subjects (
     subject_code VARCHAR(20)  UNIQUE,
     class_id     INTEGER      REFERENCES classes(id) ON DELETE SET NULL,
     created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    -- prevents two "Math" rows for the same class
     UNIQUE (class_id, subject_name)
 );
 CREATE INDEX idx_subjects_class ON subjects(class_id);
@@ -143,6 +141,8 @@ CREATE TABLE students (
     dob               DATE,
     guardian_name     VARCHAR(100),
     guardian_phone    VARCHAR(20),
+    name_en           VARCHAR(100),
+    guardian_name_en  VARCHAR(100),
     created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at        DATETIME,
     UNIQUE (section_id, roll_number)
@@ -171,6 +171,24 @@ CREATE TABLE parent_students (
     PRIMARY KEY (parent_user_id, student_id)
 );
 CREATE INDEX idx_parent_students_student ON parent_students(student_id);
+
+-- Role sanity triggers: teachers.user_id must be role='teacher',
+-- students.user_id must be role='student'.
+CREATE TRIGGER trg_teachers_user_role
+BEFORE INSERT ON teachers
+FOR EACH ROW
+WHEN (SELECT role FROM users WHERE id = NEW.user_id) <> 'teacher'
+BEGIN
+    SELECT RAISE(ABORT, 'teachers.user_id must reference a role=teacher user');
+END;
+
+CREATE TRIGGER trg_students_user_role
+BEFORE INSERT ON students
+FOR EACH ROW
+WHEN (SELECT role FROM users WHERE id = NEW.user_id) <> 'student'
+BEGIN
+    SELECT RAISE(ABORT, 'students.user_id must reference a role=student user');
+END;
 
 -- ─── ATTENDANCE ──────────────────────────────────────────────
 CREATE TABLE attendance (
@@ -306,6 +324,29 @@ CREATE INDEX idx_timetable_section ON timetables(section_id, day_of_week);
 CREATE UNIQUE INDEX uq_teacher_slot
     ON timetables(teacher_id, day_of_week, start_time)
     WHERE is_active = 1 AND teacher_id IS NOT NULL;
+
+-- Subject↔section class consistency for timetables. Controller already
+-- enforces this; the trigger makes it impossible to bypass with a
+-- direct INSERT or UPDATE.
+CREATE TRIGGER trg_timetable_subject_class_insert
+BEFORE INSERT ON timetables
+FOR EACH ROW
+WHEN (SELECT class_id FROM subjects WHERE id = NEW.subject_id) IS NOT NULL
+ AND (SELECT class_id FROM subjects WHERE id = NEW.subject_id)
+     <> (SELECT class_id FROM sections WHERE id = NEW.section_id)
+BEGIN
+    SELECT RAISE(ABORT, 'timetable: subject does not belong to section class');
+END;
+
+CREATE TRIGGER trg_timetable_subject_class_update
+BEFORE UPDATE OF subject_id, section_id ON timetables
+FOR EACH ROW
+WHEN (SELECT class_id FROM subjects WHERE id = NEW.subject_id) IS NOT NULL
+ AND (SELECT class_id FROM subjects WHERE id = NEW.subject_id)
+     <> (SELECT class_id FROM sections WHERE id = NEW.section_id)
+BEGIN
+    SELECT RAISE(ABORT, 'timetable: subject does not belong to section class');
+END;
 
 CREATE TABLE homework (
     id             INTEGER      PRIMARY KEY AUTOINCREMENT,
@@ -544,6 +585,7 @@ CREATE TABLE audit_logs (
 );
 CREATE INDEX idx_audit_user   ON audit_logs(user_id);
 CREATE INDEX idx_audit_entity ON audit_logs(entity, entity_id);
+CREATE INDEX idx_audit_ip     ON audit_logs(ip);
 
 CREATE TABLE system_settings (
     id            INTEGER      PRIMARY KEY AUTOINCREMENT,
@@ -556,10 +598,6 @@ CREATE TABLE system_settings (
 );
 
 -- ─── updated_at TRIGGERS ─────────────────────────────────────
--- Keeps updated_at current on tables that carry it. Without these,
--- updated_at is only set if the caller remembers to set it manually,
--- which is fragile and easy to miss in a refactor.
-
 CREATE TRIGGER trg_users_updated_at
 AFTER UPDATE ON users
 FOR EACH ROW
