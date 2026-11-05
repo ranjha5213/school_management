@@ -36,11 +36,48 @@ const StudentModel = {
     return all(sql, params);
   },
 
-  update: (id, patch) => {
-    const keys = Object.keys(patch);
-    if (!keys.length) return Promise.resolve({ changes: 0 });
-    const sql = `UPDATE students SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`;
-    return run(sql, [...keys.map((k) => patch[k]), id]);
+  update: async (id, patch) => {
+    // Split: users-table fields go to users; everything else on students.
+    const {
+      name, email, phone,          // → users
+      ...studentPatch
+    } = patch;
+
+    const STUDENT_COLS = [
+      'section_id', 'roll_number', 'gender', 'dob',
+      'guardian_name', 'guardian_phone',
+      'name_en', 'guardian_name_en',
+    ];
+    const validKeys = Object.keys(studentPatch).filter((k) => STUDENT_COLS.includes(k));
+
+    // ── users table (name / email / phone) ──
+    const userSets = [];
+    const userVals = [];
+    if (name !== undefined && name !== null && String(name).trim() !== '') {
+      userSets.push('name = ?');
+      userVals.push(String(name).trim());
+    }
+    if (email !== undefined && email !== null && String(email).trim() !== '') {
+      userSets.push('email = ?');
+      userVals.push(String(email).trim());
+    }
+    if (phone !== undefined) {
+      userSets.push('phone = ?');
+      userVals.push(phone ? String(phone).trim() : null);
+    }
+    if (userSets.length) {
+      userVals.push(id);
+      await run(
+        `UPDATE users SET ${userSets.join(', ')}
+          WHERE id = (SELECT user_id FROM students WHERE id = ?)`,
+        userVals
+      );
+    }
+
+    // ── students table ──
+    if (!validKeys.length) return { changes: 0 };
+    const sql = `UPDATE students SET ${validKeys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`;
+    return run(sql, [...validKeys.map((k) => studentPatch[k]), id]);
   },
 
   remove: (id) => run(`DELETE FROM students WHERE id = ?`, [id]),
