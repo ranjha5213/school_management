@@ -1,6 +1,26 @@
 const { run, get, all } = require('../config/database');
 
 const HomeworkModel = {
+  forStudent: (student_id) =>
+    all(
+      `SELECT h.*,
+              sub.subject_name, sub.class_id,
+              c.class_name, c.class_code,
+              tu.name AS teacher_name,
+              uu.name AS updated_by_name
+         FROM homework h
+         LEFT JOIN subjects sub ON h.subject_id = sub.id
+         LEFT JOIN classes c ON sub.class_id = c.id
+         LEFT JOIN teachers t ON h.teacher_id = t.id
+         LEFT JOIN users tu ON t.user_id = tu.id
+         LEFT JOIN users uu ON h.updated_by = uu.id
+         JOIN students st ON st.id = ?
+         JOIN sections sec ON sec.id = st.section_id
+        WHERE sub.class_id = sec.class_id OR sub.class_id IS NULL
+        ORDER BY h.due_date DESC, h.id DESC`,
+      [student_id]
+    ),
+
   list: (filters = {}) => {
     let sql = `
       SELECT h.*,

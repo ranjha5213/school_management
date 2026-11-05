@@ -4,10 +4,17 @@ const { apiResponse } = require('../utils/helpers');
 const logger = require('../utils/logger');
 const realtime = require('../realtime/socket');
 const { all } = require('../config/database');
+const StudentModel    = require('../models/studentModel');
 
 // ─── List ───
 const listHomework = async (req, res, next) => {
   try {
+    if (req.user.role === 'student') {
+      const student = await StudentModel.findByUserId(req.user.id);
+      if (!student) return apiResponse(res, 403, false, 'Not a student');
+      const rows = await HomeworkModel.forStudent(student.id);
+      return apiResponse(res, 200, true, 'My homework', rows);
+    }
     const rows = await HomeworkModel.list({
       class_id:   req.query.class_id   ? Number(req.query.class_id)   : undefined,
       teacher_id: req.query.teacher_id ? Number(req.query.teacher_id) : undefined,
