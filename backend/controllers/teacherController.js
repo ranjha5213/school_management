@@ -37,7 +37,7 @@ const createTeacher = async (req, res, next) => {
   try {
     const {
       name, email, password,
-      employee_code, department_id, qualification, join_date, salary,
+      employee_code, department_id, qualification, join_date, salary_cents,
       phone,
     } = req.body;
 
@@ -100,7 +100,7 @@ const updateTeacher = async (req, res, next) => {
 
     const {
       name, email, phone,
-      employee_code, department_id, qualification, join_date, salary,
+      employee_code, department_id, qualification, join_date, salary_cents,
     } = req.body;
 
     // Check employee_code uniqueness
@@ -123,7 +123,7 @@ const updateTeacher = async (req, res, next) => {
     if (department_id !== undefined) teacher_patch.department_id = department_id || null;
     if (qualification !== undefined) teacher_patch.qualification = qualification || null;
     if (join_date !== undefined) teacher_patch.join_date = join_date || null;
-    if (salary !== undefined) teacher_patch.salary = salary || null;
+    if (salary_cents !== undefined) teacher_patch.salary_cents = Number(salary_cents) || 0;
 
     if (Object.keys(teacher_patch).length) {
       await TeacherModel.update(id, teacher_patch);

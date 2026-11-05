@@ -48,16 +48,14 @@ const TeacherModel = {
   },
 
   update: (id, patch) => {
-    // Translate salary (PKR) → salary_cents if present
-    const clean = { ...patch };
-    if (clean.salary != null) {
-      clean.salary_cents = Math.round(Number(clean.salary) * 100);
-      delete clean.salary;
-    }
-    const keys = Object.keys(clean);
+    const ALLOWED = [
+      'employee_code', 'department_id', 'qualification',
+      'join_date', 'salary_cents',
+    ];
+    const keys = Object.keys(patch).filter((k) => ALLOWED.includes(k));
     if (!keys.length) return Promise.resolve({ changes: 0 });
     const sql = `UPDATE teachers SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`;
-    return run(sql, [...keys.map((k) => clean[k]), id]);
+    return run(sql, [...keys.map((k) => patch[k]), id]);
   },
 
   remove: (id) => run(`DELETE FROM teachers WHERE id = ?`, [id]),
