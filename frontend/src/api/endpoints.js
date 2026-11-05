@@ -70,6 +70,8 @@ export const teachersApi = {
 };
 
 export const attendanceApi = {
+  my: () => unwrap(client.get('/attendance/me')),
+  mySummary: () => unwrap(client.get('/attendance/me/summary')),
   byDate: (date, sectionId) =>
     unwrap(client.get('/attendance/date', { params: { date, section_id: sectionId } })),
   bulk: (records, sectionId) =>
@@ -137,7 +139,13 @@ export const noticesApi = {
 
 export const timetableApi = {
   list: (params) => unwrap(client.get('/timetable', { params })),
+  my: () => unwrap(client.get('/timetable/my')),
+  mySchedule: () => unwrap(client.get('/timetable/my-schedule')),
+  school: () => unwrap(client.get('/timetable/school')),
+  search: (params) => unwrap(client.get('/timetable/search', { params })),
   bySection: (sectionId) => unwrap(client.get(`/timetable/section/${sectionId}`)),
+  subjectsForSection: (sectionId) => unwrap(client.get(`/timetable/subjects/${sectionId}`)),
+  teachersForSection: (sectionId) => unwrap(client.get(`/timetable/teachers/${sectionId}`)),
   get: (id) => unwrap(client.get(`/timetable/${id}`)),
   create: (p) => unwrap(client.post('/timetable', p)),
   update: (id, p) => unwrap(client.patch(`/timetable/${id}`, p)),
