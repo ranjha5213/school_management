@@ -25,6 +25,29 @@ router.get('/',
 router.get('/section/:sectionId',
   authorize('admin', 'teacher', 'accountant', 'student'),
   attachStudentId, c.weeklyGrid);
+router.get('/my', authorize('student'), c.myTimetable);
+
+// Must come BEFORE /:id so '/subjects/:sectionId' isn't shadowed.
+router.get('/subjects/:sectionId',
+  authorize('admin', 'teacher'),
+  c.subjectsForSection);
+
+router.get('/teachers/:sectionId',
+  authorize('admin', 'teacher'),
+  c.teachersForSection);
+
+router.get('/my-schedule',
+  authorize('teacher'),
+  c.myTeachingSchedule);
+
+router.get('/school',
+  authorize('admin'),
+  c.schoolTimetable);
+
+router.get('/search',
+  authorize('admin', 'teacher'),
+  c.searchTimetable);
+
 router.get('/:id',
   authorize('admin', 'teacher', 'accountant'),
   c.getSlot);

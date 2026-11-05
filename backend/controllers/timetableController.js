@@ -6,6 +6,7 @@ const ApprovalModel  = require('../models/approvalModel');
 const { apiResponse } = require('../utils/helpers');
 const logger          = require('../utils/logger');
 const { DAYS_OF_WEEK } = require('../config/constants');
+const StudentModel    = require('../models/studentModel');
 
 // ─── Constants ───
 const DAYS = DAYS_OF_WEEK; // ['Monday','Tuesday',…]
@@ -216,8 +217,77 @@ const deleteSlot = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
+// ─── Student self-service: my timetable ───
+const myTimetable = async (req, res, next) => {
+  try {
+    const student = await StudentModel.findByUserId(req.user.id);
+    if (!student || !student.section_id) {
+      return apiResponse(res, 403, false, 'No section assigned to your account');
+    }
+    const rows = await TimetableModel.weeklyForSection(student.section_id);
+    return apiResponse(res, 200, true, 'My timetable', rows);
+  } catch (e) { next(e); }
+};
+
+// ─── Section-scoped lookups for the Add Slot form ───
+const teachersForSection = async (req, res, next) => {
+  try {
+    const section_id = Number(req.params.sectionId);
+    if (!section_id) return apiResponse(res, 400, false, 'sectionId required');
+    const rows = await TimetableModel.teachersForSection(section_id);
+    return apiResponse(res, 200, true, 'Teachers for section', rows);
+  } catch (e) { next(e); }
+};
+
+const subjectsForSection = async (req, res, next) => {
+  try {
+    const section_id = Number(req.params.sectionId);
+    if (!section_id) return apiResponse(res, 400, false, 'sectionId required');
+    const rows = await TimetableModel.subjectsForSection(section_id);
+    return apiResponse(res, 200, true, 'Subjects for section', rows);
+  } catch (e) { next(e); }
+};
+
+const myTeachingSchedule = async (req, res, next) => {
+  try {
+    const TeacherModel = require('../models/teacherModel');
+    const teacher = await TeacherModel.findByUserId(req.user.id);
+    if (!teacher) return apiResponse(res, 403, false, 'Not a teacher');
+    const rows = await TimetableModel.byTeacher(teacher.id);
+    return apiResponse(res, 200, true, 'My teaching schedule', rows);
+  } catch (e) { next(e); }
+};
+
+const schoolTimetable = async (req, res, next) => {
+  try {
+    const rows = await TimetableModel.schoolGrid();
+    return apiResponse(res, 200, true, 'School timetable', rows);
+  } catch (e) { next(e); }
+};
+
+const searchTimetable = async (req, res, next) => {
+  try {
+    const filters = {
+      class_id:   req.query.class_id   ? Number(req.query.class_id)   : undefined,
+      section_id: req.query.section_id ? Number(req.query.section_id) : undefined,
+      teacher_id: req.query.teacher_id ? Number(req.query.teacher_id) : undefined,
+      subject_id: req.query.subject_id ? Number(req.query.subject_id) : undefined,
+      day:        req.query.day,
+      period:     req.query.period,
+      q:          req.query.q,
+    };
+    const rows = await TimetableModel.searchSlots(filters);
+    return apiResponse(res, 200, true, 'Timetable search', rows);
+  } catch (e) { next(e); }
+};
+
 module.exports = {
   listTimetable, weeklyGrid, getSlot,
   createSlot, updateSlot, deleteSlot,
+  subjectsForSection, teachersForSection,
+  myTimetable,
   _validateTimetableChange,
+  myTeachingSchedule,
+  schoolTimetable,
+  searchTimetable,
 };
