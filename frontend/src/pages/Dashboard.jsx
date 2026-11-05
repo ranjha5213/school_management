@@ -6,12 +6,18 @@ import {
 } from 'lucide-react';
 import Card from '../components/Card';
 import Loader from '../components/Loader';
+import { useAuth } from '../context/AuthContext';
 import {
-  classesApi, reportsApi, feesApi, noticesApi, attendanceApi,
+  classesApi, reportsApi, feesApi, noticesApi,
 } from '../api/endpoints';
+
+const STAFF = ['admin', 'teacher', 'accountant'];
 
 export default function Dashboard() {
   const nav = useNavigate();
+  const { user } = useAuth();
+  const isStaff = STAFF.includes(user?.role);
+
   const [classes, setClasses] = useState([]);
   const [stats, setStats] = useState(null);
   const [feeSummary, setFeeSummary] = useState(null);
@@ -20,6 +26,10 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!isStaff) {
+      setLoading(false);
+      return;
+    }
     Promise.all([
       classesApi.list().catch(() => []),
       reportsApi.dashboard().catch(() => null),
@@ -32,24 +42,39 @@ export default function Dashboard() {
       setInbox(n);
       setTodayAttendance(s?.attendanceToday);
     }).finally(() => setLoading(false));
-  }, []);
+  }, [isStaff]);
 
-  const tiles = [
-    { label: 'Students',     value: stats?.students ?? '—',    icon: Users,        to: '/students',   color: 'from-green-500' },
-    { label: 'Teachers',     value: stats?.teachers ?? '—',    icon: GraduationCap,to: '/teachers',   color: 'from-amber-500' },
-    { label: 'Classes',      value: stats?.classes ?? '—',     icon: School,       to: '/classes',    color: 'from-blue-500' },
-    { label: 'Sections',     value: stats?.sections ?? '—',    icon: School,       to: '/classes',    color: 'from-purple-500' },
-    { label: 'Attendance',   value: todayAttendance?.total ?? '—', icon: CalendarCheck, to: '/attendance', color: 'from-red-500' },
-    { label: 'Homework',     value: 'Open',                    icon: ClipboardList,to: '/homework',   color: 'from-teal-500' },
-    { label: 'Timetable',    value: 'Open',                    icon: BookOpen,     to: '/timetable',  color: 'from-indigo-500' },
-    { label: 'Notices',      value: inbox?.unread_count ?? 0,  icon: Bell,         to: '/notices',    color: 'from-pink-500' },
+  const staffTiles = [
+    { label: 'Students',   value: stats?.students ?? '—',        icon: Users,         to: '/students',   color: 'from-green-500'  },
+    { label: 'Teachers',   value: stats?.teachers ?? '—',        icon: GraduationCap, to: '/teachers',   color: 'from-amber-500'  },
+    { label: 'Classes',    value: stats?.classes  ?? '—',        icon: School,        to: '/classes',    color: 'from-blue-500'   },
+    { label: 'Sections',   value: stats?.sections ?? '—',        icon: School,        to: '/classes',    color: 'from-purple-500' },
+    { label: 'Attendance', value: todayAttendance?.total ?? '—', icon: CalendarCheck, to: '/attendance', color: 'from-red-500'    },
+    { label: 'Homework',   value: 'Open',                        icon: ClipboardList, to: '/homework',   color: 'from-teal-500'   },
+    { label: 'Timetable',  value: 'Open',                        icon: BookOpen,      to: '/timetable',  color: 'from-indigo-500' },
+    { label: 'Notices',    value: inbox?.unread_count ?? 0,      icon: Bell,          to: '/notices',    color: 'from-pink-500'   },
   ];
+
+  const studentTiles = [
+    { label: 'My Exams',   value: 'Open', icon: ClipboardList, to: '/mcq',         color: 'from-teal-500'   },
+    { label: 'My Results', value: 'Open', icon: TrendingUp,    to: '/my-results',  color: 'from-indigo-500' },
+    { label: 'Homework',   value: 'Open', icon: BookOpen,      to: '/homework',    color: 'from-pink-500'   },
+    { label: 'Timetable',  value: 'Open', icon: CalendarCheck, to: '/timetable',   color: 'from-blue-500'   },
+    { label: 'Notices',    value: 'Open', icon: Bell,          to: '/notices',     color: 'from-amber-500'  },
+    { label: 'Attendance', value: 'Open', icon: CheckCircle2,  to: '/attendance',  color: 'from-green-500'  },
+  ];
+
+  const tiles = isStaff ? staffTiles : studentTiles;
 
   if (loading) return <Loader />;
 
   return (
     <div className="space-y-4 animate-fade-in">
-      {/* ─── Stat tiles ─── */}
+      <h2 className="text-lg font-semibold">
+        {isStaff ? `Welcome, ${user?.name || 'Staff'}` : `Hello, ${user?.name || 'Student'}`}
+      </h2>
+
+      {/* Stat tiles — role-aware */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         {tiles.map((t) => {
           const Icon = t.icon;
@@ -57,7 +82,7 @@ export default function Dashboard() {
             <button
               key={t.label}
               onClick={() => nav(t.to)}
-              className="group relative overflow-hidden text-left p-4 rounded-2xl bg-white dark:bg-slate-900 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 dark:border-slate-800 hover:shadow-lg hover:-translate-y-0.5 transition"
+              className="group relative overflow-hidden text-left p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:shadow-lg hover:-translate-y-0.5 transition"
             >
               <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${t.color} to-transparent opacity-70`} />
               <div className="flex items-center justify-between">
@@ -70,8 +95,8 @@ export default function Dashboard() {
         })}
       </div>
 
-      {/* ─── Attendance snapshot ─── */}
-      {todayAttendance && todayAttendance.total > 0 && (
+      {/* Staff-only: attendance snapshot */}
+      {isStaff && todayAttendance && todayAttendance.total > 0 && (
         <Card className="p-5">
           <h3 className="font-semibold mb-3 flex items-center gap-2">
             <TrendingUp className="w-4 h-4 text-brand-600" /> Today's Attendance
@@ -97,8 +122,8 @@ export default function Dashboard() {
         </Card>
       )}
 
-      {/* ─── Fee snapshot ─── */}
-      {feeSummary && (
+      {/* Staff-only: fee snapshot */}
+      {isStaff && feeSummary && (
         <Card className="p-5">
           <h3 className="font-semibold mb-3 flex items-center gap-2">
             <DollarSign className="w-4 h-4 text-brand-600" /> Fees Overview
@@ -129,33 +154,47 @@ export default function Dashboard() {
         </Card>
       )}
 
-      {/* ─── Classes grid ─── */}
-      <Card className="p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold">Classes</h3>
-          <button onClick={() => nav('/classes')} className="text-xs text-brand-600 hover:underline">
-            View all →
-          </button>
-        </div>
-        {classes.length === 0 ? (
-          <div className="text-sm text-slate-500">No classes yet</div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            {classes.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => nav(`/classes/${c.id}`)}
-                className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 dark:hover:bg-slate-800 text-left transition"
-              >
-                <div className="font-medium">{c.class_name}</div>
-                <div className="text-xs text-slate-500">
-                  {c.section_count} sections · {c.student_count} students
-                </div>
-              </button>
-            ))}
+      {/* Staff-only: classes grid */}
+      {isStaff && (
+        <Card className="p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold">Classes</h3>
+            <button onClick={() => nav('/classes')} className="text-xs text-brand-600 hover:underline">
+              View all →
+            </button>
           </div>
-        )}
-      </Card>
+          {classes.length === 0 ? (
+            <div className="text-sm text-slate-500">No classes yet</div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {classes.map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => nav(`/classes/${c.id}`)}
+                  className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-left transition"
+                >
+                  <div className="font-medium">{c.class_name}</div>
+                  <div className="text-xs text-slate-500">
+                    {c.section_count} sections · {c.student_count} students
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* Student-only: help card */}
+      {!isStaff && (
+        <Card className="p-5">
+          <h3 className="font-semibold mb-2">Get started</h3>
+          <p className="text-sm text-slate-500">
+            Check <a href="/mcq" className="text-brand-600 hover:underline">My Exams</a> for scheduled tests,
+            <a href="/homework" className="text-brand-600 hover:underline"> Homework</a> for assignments,
+            and <a href="/my-results" className="text-brand-600 hover:underline"> My Results</a> for grades.
+          </p>
+        </Card>
+      )}
     </div>
   );
 }

@@ -21,6 +21,7 @@ import Attendance from './pages/Attendance';
 import Exams from './pages/Exams';
 import Homework from './pages/Homework';
 import Timetable from './pages/Timetable';
+import SchoolTimetable from './pages/SchoolTimetable';
 import Fees from './pages/Fees';
 import Mcq from './pages/Mcq';
 import TakeMcq from './pages/TakeMcq';
@@ -84,6 +85,7 @@ export default function App() {
               <Route path="homework" element={<Homework />} />
               <Route path="homework/:homeworkId" element={<Homework />} />
               <Route path="timetable" element={<Timetable />} />
+              <Route path="timetable/school" element={<Protected roles={['admin']}><SchoolTimetable /></Protected>} />
               <Route path="timetable/:sectionId" element={<Timetable />} />
               <Route path="fees" element={<Fees />} />
               <Route path="mcq" element={<Protected roles={['admin', 'teacher', 'student']}><Mcq /></Protected>} />

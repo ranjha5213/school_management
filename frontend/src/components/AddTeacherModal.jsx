@@ -17,7 +17,11 @@ export default function AddTeacherModal({ mode = 'create', initial = null, onClo
     department_id: initial?.department_id || '',
     qualification: initial?.qualification || '',
     join_date: initial?.join_date || '',
-    salary: initial?.salary ?? '',
+    // salary_cents is the DB column; display in rupees for the user.
+    // Convert back to cents on save.
+    salary: initial?.salary_cents != null && initial.salary_cents !== ''
+      ? initial.salary_cents / 100
+      : '',
   });
   const [departments, setDepartments] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -45,7 +49,9 @@ export default function AddTeacherModal({ mode = 'create', initial = null, onClo
         department_id: form.department_id ? Number(form.department_id) : null,
         qualification: form.qualification || null,
         join_date: form.join_date || null,
-        salary: form.salary === '' ? null : Number(form.salary),
+        salary_cents: form.salary === '' || form.salary == null
+          ? undefined
+          : Math.round(Number(form.salary) * 100),
       };
       if (mode === 'create' && form.password) payload.password = form.password;
 

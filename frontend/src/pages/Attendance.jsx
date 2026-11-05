@@ -10,7 +10,9 @@ import Button from '../components/Button';
 import Empty from '../components/Empty';
 import { attendanceApi, studentsApi, classesApi } from '../api/endpoints';
 import { useSocket } from '../context/SocketContext';
+import { useAuth } from '../context/AuthContext';
 
+import Loader from "../components/Loader";
 const STATUSES = [
   { id: 'present', label: 'Present', color: 'green',  icon: CheckCircle2 },
   { id: 'absent',  label: 'Absent',  color: 'red',    icon: XCircle },
@@ -27,7 +29,42 @@ const chipActiveClass = {
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
+function StudentAttendance() {
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    attendanceApi.my()
+      .then((d) => setRows(Array.isArray(d) ? d : (d?.data || [])))
+      .catch(() => setRows([]));
+  }, []);
+
+  if (rows === null) return <Loader />;
+  if (!rows.length)  return <Empty title="No attendance records yet" hint="Your teacher hasn't marked attendance for you." />;
+
+  return (
+    <div className="space-y-3">
+      <h1 className="text-lg font-semibold">My Attendance</h1>
+      <Card className="p-0">
+        <ul className="divide-y divide-slate-200 dark:divide-slate-700">
+          {rows.map((r) => (
+            <li key={r.id} className="px-4 py-2 flex items-center justify-between text-sm">
+              <span className="font-mono">{r.date}</span>
+              <span className={
+                r.status === 'present' ? 'text-emerald-600 font-medium'
+                : r.status === 'absent' ? 'text-red-600 font-medium'
+                : r.status === 'late'   ? 'text-amber-600 font-medium'
+                : 'text-slate-500'
+              }>{r.status}</span>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </div>
+  );
+}
+
 export default function Attendance() {
+  const { user } = useAuth();
+  if (user?.role === 'student') return <StudentAttendance />;
   const [classes, setClasses] = useState([]);
   const [sections, setSections] = useState([]);
   const [classId, setClassId] = useState('');
