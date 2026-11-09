@@ -257,4 +257,161 @@ const TimetableModel = {
     ),
 };
 
+/* ════════════════════════════════════════════════════════════════
+   DRILL-DOWN — use the same promise-based all/get/run helpers
+   ════════════════════════════════════════════════════════════════ */
+
+/**
+ * Derive period slots from actual timetables for a given day.
+ * Returns [{ index, label, start, end }, ...] sorted by start_time.
+ */
+const periodsForDay = async (day) => {
+  const sql = `
+    SELECT DISTINCT start_time, end_time
+    FROM timetables
+    WHERE is_active = 1 AND LOWER(day_of_week) = LOWER(?)
+    ORDER BY start_time
+  `;
+  const rows = await all(sql, [day]);
+  return rows.map((r, i) => ({
+    index: i + 1,
+    label: `Period ${i + 1}`,
+    start: r.start_time,
+    end: r.end_time,
+  }));
+};
+
+/**
+ * Full grid for one day — every section (scheduled or empty) + its periods.
+ * Returns { periods, sections } where each section has a `periods` map
+ * keyed by start_time.
+ */
+const gridForDay = async (day) => {
+  const periods = await periodsForDay(day);
+
+  const sql = `
+    SELECT
+      sec.id             AS sectionId,
+      sec.section_name   AS sectionName,
+      cls.id             AS classId,
+      cls.class_name     AS className,
+      t.start_time       AS startTime,
+      t.end_time         AS endTime,
+      t.subject_id       AS subjectId,
+      sub.subject_name   AS subjectName,
+      t.teacher_id       AS teacherId,
+      u.name             AS teacherName
+    FROM sections sec
+    JOIN classes cls ON cls.id = sec.class_id
+    LEFT JOIN timetables t ON t.section_id = sec.id
+                          AND LOWER(t.day_of_week) = LOWER(?)
+                          AND t.is_active = 1
+    LEFT JOIN subjects sub ON sub.id = t.subject_id
+    LEFT JOIN teachers tr ON tr.id = t.teacher_id
+    LEFT JOIN users u ON u.id = tr.user_id
+    ORDER BY cls.class_name ASC, sec.section_name ASC, t.start_time ASC
+  `;
+  const rows = await all(sql, [day]);
+
+  const bySection = new Map();
+  for (const r of rows) {
+    const key = String(r.sectionId);
+    if (!bySection.has(key)) {
+      bySection.set(key, {
+        sectionId: r.sectionId,
+        sectionName: r.sectionName,
+        classId: r.classId,
+        className: r.className,
+        periods: {},
+      });
+    }
+    if (r.startTime) {
+      bySection.get(key).periods[r.startTime] = {
+        startTime: r.startTime,
+        endTime: r.endTime,
+        subjectId: r.subjectId,
+        subjectName: r.subjectName,
+        teacherId: r.teacherId,
+        teacherName: r.teacherName,
+      };
+    }
+  }
+
+  return { periods, sections: Array.from(bySection.values()) };
+};
+
+/** Count periods per teacher, optionally scoped to one day. */
+const teacherLoad = async (day = null) => {
+  const sql = day
+    ? `SELECT tr.id AS teacherId, u.name AS teacherName, COUNT(*) AS periods
+       FROM timetables t
+       JOIN teachers tr ON tr.id = t.teacher_id
+       JOIN users u ON u.id = tr.user_id
+       WHERE t.is_active = 1 AND LOWER(t.day_of_week) = LOWER(?)
+       GROUP BY tr.id, u.name
+       ORDER BY periods DESC, u.name ASC`
+    : `SELECT tr.id AS teacherId, u.name AS teacherName, COUNT(*) AS periods
+       FROM timetables t
+       JOIN teachers tr ON tr.id = t.teacher_id
+       JOIN users u ON u.id = tr.user_id
+       WHERE t.is_active = 1
+       GROUP BY tr.id, u.name
+       ORDER BY periods DESC, u.name ASC`;
+  return all(sql, day ? [day] : []);
+};
+
+/**
+ * Bulk upsert timetable slots for one day.
+ * entries: [{ section_id, day_of_week, start_time, end_time, subject_id, teacher_id }]
+ * - if subject_id is null → delete the existing slot (if any)
+ * - else → insert if missing, update if exists
+ */
+const bulkUpsert = async (entries) => {
+  const results = { inserted: 0, updated: 0, deleted: 0 };
+  for (const e of entries) {
+    if (!e.subject_id) {
+      // Delete if exists
+      await run(
+        `DELETE FROM timetables
+         WHERE section_id = ? AND day_of_week = ? AND start_time = ?`,
+        [e.section_id, e.day_of_week, e.start_time]
+      );
+      results.deleted += 1;
+      continue;
+    }
+
+    const existing = await get(
+      `SELECT id FROM timetables
+       WHERE section_id = ? AND LOWER(day_of_week) = LOWER(?) AND start_time = ?`,
+      [e.section_id, e.day_of_week, e.start_time]
+    );
+
+    if (existing) {
+      await run(
+        `UPDATE timetables
+         SET subject_id = ?, teacher_id = ?, end_time = ?, is_active = 1
+         WHERE id = ?`,
+        [e.subject_id, e.teacher_id || null, e.end_time, existing.id]
+      );
+      results.updated += 1;
+    } else {
+      await run(
+        `INSERT INTO timetables
+         (section_id, subject_id, teacher_id, day_of_week, start_time, end_time, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, 1)`,
+        [e.section_id, e.subject_id, e.teacher_id || null,
+         e.day_of_week, e.start_time, e.end_time]
+      );
+      results.inserted += 1;
+    }
+  }
+  return results;
+};
+
+/* Attach the new drill-down functions to the model object */
+TimetableModel.periodsForDay = periodsForDay;
+TimetableModel.gridForDay = gridForDay;
+TimetableModel.teacherLoad = teacherLoad;
+TimetableModel.bulkUpsert = bulkUpsert;
+
 module.exports = TimetableModel;

@@ -19,8 +19,6 @@ const normalizeTime = (s) => {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`;
 };
 
-// Case-insensitive day normalizer. Accepts 'Monday', 'MONDAY', 'mon', 'Mon',
-// 'monday' and returns the canonical capitalized form that `DAYS` contains.
 const DAY_ALIASES = {
   mon: 'Monday',        tue: 'Tuesday',  wed: 'Wednesday',
   thu: 'Thursday',      fri: 'Friday',   sat: 'Saturday',  sun: 'Sunday',
@@ -42,7 +40,6 @@ const _validateTimetableChange = async ({
   if (!section_id)  return { ok: false, msg: 'section_id required' };
   if (!subject_id)  return { ok: false, msg: 'subject_id required' };
 
-  // Normalize before the DAYS check so any casing/abbreviation is accepted.
   const day = normalizeDay(day_of_week);
   if (!day || !DAYS.includes(day))
     return { ok: false, msg: `day_of_week must be one of ${DAYS.join(', ')}` };
@@ -58,7 +55,6 @@ const _validateTimetableChange = async ({
   const sec = await ClassModel.findSection(Number(section_id));
   if (!sec) return { ok: false, msg: 'Section not found' };
 
-  // ── Subject must belong to the section's class (or be class-agnostic) ──
   const subject = await SubjectModel.findById(Number(subject_id));
   if (!subject) return { ok: false, msg: 'Subject not found' };
   if (subject.class_id && subject.class_id !== sec.class_id) {
@@ -195,7 +191,7 @@ const updateSlot = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
-// ─── Delete ───
+// ─── Delete (original, with admin-approval workflow) ───
 const deleteSlot = async (req, res, next) => {
   try {
     const id = Number(req.params.id);
@@ -281,13 +277,55 @@ const searchTimetable = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
+/* ════════════════════════════════════════════════════════════════
+   DRILL-DOWN — grid for the View / Edit pages
+   ════════════════════════════════════════════════════════════════ */
+
+const getGrid = async (req, res, next) => {
+  try {
+    const day = req.query.day || 'monday';
+    const { periods, sections } = await TimetableModel.gridForDay(day);
+    const teacherLoad = await TimetableModel.teacherLoad(day);
+    return apiResponse(res, 200, true, 'Timetable grid', {
+      day, periods, sections, teacherLoad,
+    });
+  } catch (e) { next(e); }
+};
+
+const getTeacherLoad = async (req, res, next) => {
+  try {
+    const day = req.query.day || null;
+    const load = await TimetableModel.teacherLoad(day);
+    return apiResponse(res, 200, true, 'Teacher load', load);
+  } catch (e) { next(e); }
+};
+
+const bulkEdit = async (req, res, next) => {
+  try {
+    const { day, entries } = req.body;
+    if (!day || !Array.isArray(entries)) {
+      return apiResponse(res, 400, false, 'day and entries required');
+    }
+    const result = await TimetableModel.bulkUpsert(entries);
+    return apiResponse(res, 200, true, 'Bulk edit saved', result);
+  } catch (e) { next(e); }
+};
+
 module.exports = {
-  listTimetable, weeklyGrid, getSlot,
-  createSlot, updateSlot, deleteSlot,
-  subjectsForSection, teachersForSection,
+  listTimetable,
+  weeklyGrid,
+  getSlot,
+  createSlot,
+  updateSlot,
+  deleteSlot,
+  subjectsForSection,
+  teachersForSection,
   myTimetable,
   _validateTimetableChange,
   myTeachingSchedule,
   schoolTimetable,
   searchTimetable,
+  getGrid,
+  getTeacherLoad,
+  bulkEdit,
 };

@@ -189,11 +189,6 @@ BEGIN
 END;
 
 -- ─── ATTENDANCE ──────────────────────────────────────────────
--- CHANGES vs original:
---   1. status CHECK now includes 'leave' (frontend uses it)
---   2. UNIQUE (student_id, date) → partial unique index on superseded_by IS NULL
---      so re-marking (supersede pattern) can insert a new active row
---   3. Added partial indexes on date/student_id for active rows only
 CREATE TABLE attendance (
     id              INTEGER      PRIMARY KEY AUTOINCREMENT,
     student_id      INTEGER      NOT NULL REFERENCES students(id) ON DELETE CASCADE,
@@ -207,8 +202,6 @@ CREATE TABLE attendance (
     superseded_at   DATETIME
 );
 
--- Active-only unique: exactly one current record per (student, date).
--- Superseded rows are unlimited so the audit log keeps full history.
 CREATE UNIQUE INDEX uq_attendance_active
     ON attendance(student_id, date)
     WHERE superseded_by IS NULL;
@@ -217,7 +210,6 @@ CREATE INDEX idx_attendance_date      ON attendance(date);
 CREATE INDEX idx_attendance_student   ON attendance(student_id);
 CREATE INDEX idx_attendance_marked_by ON attendance(marked_by);
 
--- Partial indexes for the drill-down queries (only touch live rows).
 CREATE INDEX idx_attendance_date_active
     ON attendance(date)
     WHERE superseded_by IS NULL;
@@ -369,6 +361,20 @@ CREATE INDEX idx_timetable_teacher ON timetables(teacher_id, day_of_week);
 CREATE INDEX idx_timetable_section ON timetables(section_id, day_of_week);
 CREATE UNIQUE INDEX uq_teacher_slot
     ON timetables(teacher_id, day_of_week, start_time)
+    WHERE is_active = 1 AND teacher_id IS NOT NULL;
+
+-- 🆕 NEW: Partial indexes for the timetable drill-down queries
+CREATE INDEX idx_timetable_day_active
+    ON timetables(day_of_week)
+    WHERE is_active = 1;
+
+CREATE INDEX idx_timetable_section_day_active
+    ON timetables(section_id, day_of_week, start_time)
+    WHERE is_active = 1;
+
+-- 🆕 NEW: Speeds up the "Teacher Load" counter card
+CREATE INDEX idx_timetable_teacher_active
+    ON timetables(teacher_id, day_of_week)
     WHERE is_active = 1 AND teacher_id IS NOT NULL;
 
 CREATE TRIGGER trg_timetable_subject_class_insert

@@ -6,6 +6,10 @@ const { authenticate, authorize, attachStudentId } = require('../middleware/auth
 const router = express.Router();
 router.use(authenticate);
 
+router.get('/grid',         authorize('admin', 'teacher'), c.getGrid);
+router.get('/teacher-load', authorize('admin', 'teacher'), c.getTeacherLoad);
+router.post('/bulk-edit',   authorize('admin'),              c.bulkEdit);
+router.delete('/slot/:id',  authorize('admin'),              c.deleteSlot);
 // ─── Approvals (must come before /:id) ───
 router.get('/approvals/queue',
   authorize('admin'),

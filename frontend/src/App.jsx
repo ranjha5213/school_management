@@ -32,11 +32,16 @@ import Library from './pages/Library';
 import Notices from './pages/Notices';
 import Profile from './pages/Profile';
 
-// ─── NEW: Attendance drill-down pages ───
+// ─── Attendance drill-down pages ───
 import AttendanceOverview from './pages/AttendanceOverview';
 import SectionDetail from './pages/SectionDetail';
 import StudentAttendanceHistory from './pages/StudentAttendanceHistory';
 import MyAttendance from './pages/MyAttendance';
+
+// ─── NEW: Timetable drill-down pages ───
+import TimetableView from './pages/TimetableView';
+import TimetableEdit from './pages/TimetableEdit';
+import TimetableAdd from './pages/TimetableAdd';
 
 function Protected({ children, adminOnly = false, roles = null }) {
   const { user, loading } = useAuth();
@@ -93,7 +98,7 @@ export default function App() {
                   {/* Existing mark-attendance page */}
                   <Route path="attendance" element={<Attendance />} />
 
-                  {/* ─── NEW: Attendance drill-down (inside layout) ─── */}
+                  {/* ─── Attendance drill-down (inside layout) ─── */}
                   <Route
                     path="attendance/view"
                     element={<Protected roles={['admin', 'teacher']}><AttendanceOverview /></Protected>}
@@ -115,9 +120,29 @@ export default function App() {
                   <Route path="exams/:examId" element={<Exams />} />
                   <Route path="homework" element={<Homework />} />
                   <Route path="homework/:homeworkId" element={<Homework />} />
+
+                  {/* ─── Timetable (existing + new drill-down) ─── */}
                   <Route path="timetable" element={<Timetable />} />
-                  <Route path="timetable/school" element={<Protected roles={['admin']}><SchoolTimetable /></Protected>} />
+                  <Route
+                    path="timetable/school"
+                    element={<Protected roles={['admin']}><SchoolTimetable /></Protected>}
+                  />
                   <Route path="timetable/:sectionId" element={<Timetable />} />
+
+                  {/* NEW: Timetable drill-down routes */}
+                  <Route
+                    path="timetable/view"
+                    element={<Protected roles={['admin', 'teacher']}><TimetableView /></Protected>}
+                  />
+                  <Route
+                    path="timetable/add"
+                    element={<Protected roles={['admin']}><TimetableAdd /></Protected>}
+                  />
+                  <Route
+                    path="timetable/edit"
+                    element={<Protected roles={['admin']}><TimetableEdit /></Protected>}
+                  />
+
                   <Route path="fees" element={<Fees />} />
                   <Route path="mcq" element={<Protected roles={['admin', 'teacher', 'student']}><Mcq /></Protected>} />
                   <Route path="mcq/:examId" element={<Protected roles={['admin', 'teacher', 'student']}><Mcq /></Protected>} />

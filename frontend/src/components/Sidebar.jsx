@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { X, ChevronDown, ChevronRight, CheckSquare, Eye } from 'lucide-react';
+import {
+  X, ChevronDown, ChevronRight, CheckSquare, Eye, Plus, Pencil,
+} from 'lucide-react';
 import {
   LayoutDashboard, CalendarCheck, Users, GraduationCap, BookOpen,
   FileText, DollarSign, Library as LibraryIcon, ClipboardList, Bell, User,
@@ -9,9 +11,9 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 
-// NOTE: `Attendance` is intentionally NOT in these arrays for admin/teacher —
-// it's rendered as a collapsible submenu below. Students get `My Attendance`
-// as a top-level link instead.
+// NOTE: `Attendance` and `Timetable` are intentionally NOT in these arrays
+// for admin/teacher — they're rendered as collapsible submenus below.
+// Students get `My Attendance` as a top-level link instead.
 const NAV_BY_ROLE = {
   admin: [
     { to: '/dashboard',      label: 'Dashboard',     icon: LayoutDashboard },
@@ -19,11 +21,11 @@ const NAV_BY_ROLE = {
     { to: '/classes',        label: 'Classes',       icon: School },
     { to: '/students',       label: 'Students',      icon: Users },
     { to: '/teachers',       label: 'Teachers',      icon: GraduationCap },
-    // Attendance is rendered specially below (collapsible submenu)
+    // Attendance submenu is rendered specially below
+    // Timetable submenu is rendered specially below
     { to: '/exams',          label: 'Exams',         icon: FileText },
     { to: '/mcq',            label: 'MCQ Tests',     icon: FileText },
     { to: '/homework',       label: 'Homework',      icon: ClipboardList },
-    { to: '/timetable',      label: 'Timetable',     icon: BookOpen },
     { to: '/fees',           label: 'Fees',          icon: DollarSign },
     { to: '/library',        label: 'Library',       icon: LibraryIcon },
     { to: '/notices',        label: 'Notices',       icon: Bell },
@@ -34,18 +36,18 @@ const NAV_BY_ROLE = {
     { to: '/classes',        label: 'Classes',       icon: School },
     { to: '/students',       label: 'Students',      icon: Users },
     { to: '/teachers',       label: 'Teachers',      icon: GraduationCap },
-    // Attendance is rendered specially below (collapsible submenu)
+    // Attendance submenu is rendered specially below
+    // Timetable submenu is rendered specially below
     { to: '/exams',          label: 'Exams',         icon: FileText },
     { to: '/mcq',            label: 'MCQ Tests',     icon: FileText },
     { to: '/homework',       label: 'Homework',      icon: ClipboardList },
-    { to: '/timetable',      label: 'Timetable',     icon: BookOpen },
     { to: '/library',        label: 'Library',       icon: LibraryIcon },
     { to: '/notices',        label: 'Notices',       icon: Bell },
     { to: '/profile',        label: 'Profile',       icon: User },
   ],
   student: [
     { to: '/dashboard',      label: 'Dashboard',     icon: LayoutDashboard },
-    { to: '/my-attendance',  label: 'My Attendance', icon: CalendarCheck },  // NEW
+    { to: '/my-attendance',  label: 'My Attendance', icon: CalendarCheck },
     { to: '/mcq',            label: 'My Tests',      icon: FileText },
     { to: '/my-results',     label: 'My Results',    icon: Award },
     { to: '/homework',       label: 'Homework',      icon: ClipboardList },
@@ -68,10 +70,14 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
 
   const role = user?.role;
   const hasAttendanceMenu = role === 'admin' || role === 'teacher';
+  const hasTimetableMenu = role === 'admin' || role === 'teacher';
 
-  // Auto-open the attendance submenu if we're already on an attendance route
+  // Auto-open submenus if we're already on a matching route
   const [attendanceOpen, setAttendanceOpen] = useState(
     location.pathname.startsWith('/attendance')
+  );
+  const [timetableOpen, setTimetableOpen] = useState(
+    location.pathname.startsWith('/timetable')
   );
 
   const nav = NAV_BY_ROLE[role] || NAV_BY_ROLE.student;
@@ -134,6 +140,46 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
                 </NavLink>
                 <NavLink to="/attendance" className={subLinkClass} onClick={onClose}>
                   <CheckSquare className="w-3.5 h-3.5" /> Mark Attendance
+                </NavLink>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Collapsible Timetable submenu — admin & teacher only */}
+        {hasTimetableMenu && (
+          <div>
+            <button
+              type="button"
+              onClick={() => setTimetableOpen((v) => !v)}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition ${
+                location.pathname.startsWith('/timetable')
+                  ? 'bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-300 font-medium'
+                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <span className="flex items-center gap-2.5">
+                <BookOpen className="w-4 h-4" />
+                Timetable
+              </span>
+              {timetableOpen
+                ? <ChevronDown className="w-4 h-4" />
+                : <ChevronRight className="w-4 h-4" />}
+            </button>
+
+            {timetableOpen && (
+              <div className="ml-5 mt-0.5 pl-2 border-l border-slate-200 dark:border-slate-800 flex flex-col gap-0.5">
+                <NavLink to="/timetable/view" className={subLinkClass} onClick={onClose}>
+                  <Eye className="w-3.5 h-3.5" /> View
+                </NavLink>
+                <NavLink to="/timetable/add" className={subLinkClass} onClick={onClose}>
+                  <Plus className="w-3.5 h-3.5" /> Add
+                </NavLink>
+                <NavLink to="/timetable/edit" className={subLinkClass} onClick={onClose}>
+                  <Pencil className="w-3.5 h-3.5" /> Edit
+                </NavLink>
+                <NavLink to="/timetable" className={subLinkClass} onClick={onClose} end>
+                  <BookOpen className="w-3.5 h-3.5" /> Classic
                 </NavLink>
               </div>
             )}
