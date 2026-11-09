@@ -1,6 +1,11 @@
 const { run, get, all } = require('../config/database');
 
 const AttendanceModel = {
+
+  /* ────────────────────────────────
+     EXISTING METHODS (unchanged)
+     ──────────────────────────────── */
+
   insert: (d) =>
     run(
       `INSERT INTO attendance (student_id, date, status, remarks, marked_by, marked_at)
@@ -51,8 +56,9 @@ const AttendanceModel = {
       [remarks || null, student_id, date, user_id, user_id]
     ),
 
+  // FIXED: removed duplicated "superseded_by IS NULL AND superseded_by IS NULL"
   findByStudent: (student_id, { from, to, limit = 100 } = {}) => {
-    let sql = `SELECT * FROM attendance WHERE student_id = ? AND superseded_by IS NULL AND superseded_by IS NULL`;
+    let sql = `SELECT * FROM attendance WHERE student_id = ? AND superseded_by IS NULL`;
     const p = [student_id];
     if (from) { sql += ` AND date >= ?`; p.push(from); }
     if (to)   { sql += ` AND date <= ?`; p.push(to); }
@@ -128,6 +134,76 @@ const AttendanceModel = {
         WHERE student_id = ? AND date = ? AND superseded_by IS NULL`,
       [status, remarks, student_id, date]
     ),
+
+  /* ────────────────────────────────
+     DRILL-DOWN METHODS (new)
+     ──────────────────────────────── */
+
+  /**
+   * LEVEL 1: every section's present/absent/leave counts for one date.
+   * Returns one row per section, joined to its class name.
+   */
+  sectionsOverview: async (date) => {
+    const rows = await all(
+      `SELECT
+         sec.id                                              AS sectionId,
+         sec.section_name                                    AS sectionName,
+         cls.id                                              AS classId,
+         cls.class_name                                      AS className,
+         COUNT(DISTINCT s.id)                                AS total,
+         SUM(CASE WHEN a.status='present' THEN 1 ELSE 0 END) AS present,
+         SUM(CASE WHEN a.status='absent'  THEN 1 ELSE 0 END) AS absent,
+         SUM(CASE WHEN a.status='leave'   THEN 1 ELSE 0 END) AS onLeave
+       FROM sections sec
+       JOIN classes  cls ON cls.id = sec.class_id
+       LEFT JOIN students   s ON s.section_id = sec.id
+       LEFT JOIN attendance a ON a.student_id = s.id
+                             AND a.date = ?
+                             AND a.superseded_by IS NULL
+       GROUP BY sec.id, sec.section_name, cls.id, cls.class_name
+       ORDER BY cls.class_name ASC, sec.section_name ASC`,
+      [date]
+    );
+
+    return rows.map((r) => ({
+      sectionId:   r.sectionId,
+      sectionName: r.sectionName,
+      classId:     r.classId,
+      className:   r.className,
+      total:       r.total,
+      present:     r.present || 0,
+      absent:      r.absent  || 0,
+      onLeave:     r.onLeave || 0,
+      unmarked: Math.max(
+        r.total - ((r.present || 0) + (r.absent || 0) + (r.onLeave || 0)),
+        0
+      ),
+    }));
+  },
+
+  /**
+   * LEVEL 2: one section, one date → every student's status.
+   * Student names come from users.name (canonical), not name_en.
+   */
+  sectionRoster: async (sectionId, date) => {
+    return all(
+      `SELECT
+         s.id                              AS studentId,
+         u.name                            AS name,
+         s.roll_number                     AS rollNumber,
+         COALESCE(a.status, 'unmarked')    AS status,
+         a.remarks                         AS remarks
+       FROM students s
+       JOIN users u ON u.id = s.user_id
+       LEFT JOIN attendance a ON a.student_id = s.id
+                             AND a.date = ?
+                             AND a.superseded_by IS NULL
+       WHERE s.section_id = ?
+       ORDER BY (s.roll_number IS NULL), s.roll_number ASC, u.name ASC`,
+      [date, sectionId]
+    );
+  },
+
 };
 
 module.exports = AttendanceModel;

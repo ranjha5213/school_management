@@ -12,6 +12,6 @@ router.post('/', authorize('admin'), validateStudent, c.createStudent);
 router.get('/:studentId/overview', authorize('admin', 'teacher'), c.getStudentOverview);
 router.get('/:studentId/attendance', requireStudentAccess('studentId'), c.getStudentAttendance);
 router.patch('/:studentId', authorize('admin'), c.updateStudent);
-router.delete('/:studentId', authorize('admin'), validateId, c.deleteStudent);
+router.delete('/:id', authorize('admin'), validateId, c.deleteStudent);
 
 module.exports = router;

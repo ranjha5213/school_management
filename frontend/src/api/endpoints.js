@@ -55,7 +55,9 @@ export const studentsApi = {
   attendance: (id, params) => unwrap(client.get(`/students/${id}/attendance`, { params })),
   create: (p) => unwrap(client.post('/students', p)),
   update: (id, p) => unwrap(client.patch(`/students/${id}`, p)),
-  remove: (id) => unwrap(client.delete(`/students/${id}`)),
+  
+  // Updated remove function accepting a cascade option (defaulting to true or false as needed)
+  remove: (id, cascade = true) => unwrap(client.delete(`/students/${id}`, { params: { cascade } })),
 };
 
 export const teachersApi = {
@@ -74,8 +76,10 @@ export const attendanceApi = {
   mySummary: () => unwrap(client.get('/attendance/me/summary')),
   byDate: (date, sectionId) =>
     unwrap(client.get('/attendance/date', { params: { date, section_id: sectionId } })),
-  bulk: (records, sectionId) =>
-    unwrap(client.post('/attendance/bulk', { records, section_id: sectionId })),
+  bulk: (records, sectionId, { sms = false } = {}) =>
+    unwrap(client.post('/attendance/bulk', { records, section_id: sectionId }, {
+      params: sms ? { sms: 1 } : undefined,
+    })),
   updateRemarks: (studentId, date, remarks) =>
     unwrap(client.patch('/attendance/remarks', { student_id: studentId, date, remarks })),
   summary: (studentId) => unwrap(client.get(`/attendance/summary/${studentId}`)),
@@ -214,8 +218,10 @@ updateExamSchedule: (id, body) => unwrap(client.patch(`/mcq/${id}/schedule`, bod
 
   startAttempt: (examId, access_code) =>
     unwrap(client.post(`/mcq/${examId}/attempt/start`, { access_code })),
-  submitAttempt: (attemptId, answers) =>
-    unwrap(client.post(`/mcq/attempts/${attemptId}/submit`, { answers })),
+  submitAttempt: (attemptId, answers, { sms = false } = {}) =>
+    unwrap(client.post(`/mcq/attempts/${attemptId}/submit`, { answers }, {
+      params: sms ? { sms: 1 } : undefined,
+    })),
   logProctorEvent: (attemptId, kind, payload) =>
     unwrap(client.post(`/mcq/attempts/${attemptId}/proctor`, { kind, payload })),
   uploadSnapshot: (attemptId, dataUrl) =>

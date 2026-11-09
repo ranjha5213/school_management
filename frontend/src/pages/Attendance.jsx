@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   CalendarCheck, Save, CheckCircle2, XCircle, Clock, AlertCircle,
-  Users, BookOpen, Layers, Lock,
+  Users, BookOpen, Layers, Lock, CalendarOff,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Card from '../components/Card';
@@ -13,11 +13,13 @@ import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
 
 import Loader from "../components/Loader";
+
 const STATUSES = [
-  { id: 'present', label: 'Present', color: 'green',  icon: CheckCircle2 },
-  { id: 'absent',  label: 'Absent',  color: 'red',    icon: XCircle },
-  { id: 'late',    label: 'Late',    color: 'yellow', icon: Clock },
-  { id: 'excused', label: 'Excused', color: 'gray',   icon: AlertCircle },
+  { id: 'present', label: 'Present',  color: 'green',  icon: CheckCircle2 },
+  { id: 'absent',  label: 'Absent',   color: 'red',    icon: XCircle },
+  { id: 'late',    label: 'Late',     color: 'yellow', icon: Clock },
+  { id: 'excused', label: 'Excused',  color: 'gray',   icon: AlertCircle },
+  { id: 'leave',   label: 'On Leave', color: 'blue',   icon: CalendarOff },   // ← NEW
 ];
 
 const chipActiveClass = {
@@ -25,9 +27,19 @@ const chipActiveClass = {
   red:    'bg-red-100 text-red-700 ring-2 ring-red-500 dark:bg-red-500/20 dark:text-red-300',
   yellow: 'bg-amber-100 text-amber-700 ring-2 ring-amber-500 dark:bg-amber-500/20 dark:text-amber-300',
   gray:   'bg-slate-200 text-slate-700 ring-2 ring-slate-500 dark:bg-slate-600/40 dark:text-slate-300',
+  blue:   'bg-blue-100 text-blue-700 ring-2 ring-blue-500 dark:bg-blue-500/20 dark:text-blue-300',   // ← NEW
 };
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
+
+// Map status → text color for the student's own view
+const STATUS_TEXT_CLASS = {
+  present: 'text-emerald-600 font-medium',
+  absent:  'text-red-600 font-medium',
+  late:    'text-amber-600 font-medium',
+  excused: 'text-slate-500 font-medium',
+  leave:   'text-blue-600 font-medium',   // ← NEW
+};
 
 function StudentAttendance() {
   const [rows, setRows] = useState(null);
@@ -48,12 +60,9 @@ function StudentAttendance() {
           {rows.map((r) => (
             <li key={r.id} className="px-4 py-2 flex items-center justify-between text-sm">
               <span className="font-mono">{r.date}</span>
-              <span className={
-                r.status === 'present' ? 'text-emerald-600 font-medium'
-                : r.status === 'absent' ? 'text-red-600 font-medium'
-                : r.status === 'late'   ? 'text-amber-600 font-medium'
-                : 'text-slate-500'
-              }>{r.status}</span>
+              <span className={STATUS_TEXT_CLASS[r.status] || 'text-slate-500'}>
+                {r.status}
+              </span>
             </li>
           ))}
         </ul>
@@ -65,6 +74,7 @@ function StudentAttendance() {
 export default function Attendance() {
   const { user } = useAuth();
   if (user?.role === 'student') return <StudentAttendance />;
+
   const [classes, setClasses] = useState([]);
   const [sections, setSections] = useState([]);
   const [classId, setClassId] = useState('');
@@ -191,7 +201,20 @@ export default function Attendance() {
         date,
         status: records[s.id],
       }));
-      await attendanceApi.bulk(payload, sectionId);
+
+      // Prompt: if any students are absent/late, ask whether to notify guardians.
+      const absent = payload.filter(
+        (r) => r.status === 'absent' || r.status === 'late'
+      ).length;
+      const wantsSms = absent > 0
+        ? window.confirm(
+            `Mark ${payload.length} student(s)? ` +
+            `${absent} absent/late — send SMS to their guardians?`
+          )
+        : false;
+
+      await attendanceApi.bulk(payload, sectionId, { sms: wantsSms });
+      if (wantsSms) toast.success('Marked + SMS queued to guardians');
       toast.success(`Saved ${payload.length} records`);
       await loadGrid();
     } catch (e) {
@@ -202,7 +225,7 @@ export default function Attendance() {
   };
 
   const counts = useMemo(() => {
-    const c = { present: 0, absent: 0, late: 0, excused: 0 };
+    const c = { present: 0, absent: 0, late: 0, excused: 0, leave: 0 };   // ← added leave
     Object.values(records).forEach((v) => { if (c[v] !== undefined) c[v]++; });
     return c;
   }, [records]);
@@ -280,6 +303,7 @@ export default function Attendance() {
               <Button size="sm" variant="secondary" onClick={() => markAll('absent')}>All Absent</Button>
               <Button size="sm" variant="secondary" onClick={() => markAll('late')}>All Late</Button>
               <Button size="sm" variant="secondary" onClick={() => markAll('excused')}>All Excused</Button>
+              <Button size="sm" variant="secondary" onClick={() => markAll('leave')}>All On Leave</Button>   {/* ← NEW */}
               <div className="flex-1" />
               <Button onClick={saveAll} loading={saving} icon={Save} className="bg-green-600 hover:bg-green-700">
                 Save Attendance
@@ -287,7 +311,7 @@ export default function Attendance() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             {STATUSES.map((s) => {
               const Icon = s.icon;
               return (
@@ -314,7 +338,7 @@ export default function Attendance() {
                     <th className="text-center p-3">Mark Attendance</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-700 dark:divide-slate-700">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                   {students.map((s, i) => (
                     <tr key={s.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
                       <td className="p-3 text-slate-500">{i + 1}</td>

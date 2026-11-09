@@ -8,3 +8,4 @@ logs/
 uploads/
 backups/
 frontend/src/*.ts.net.*
+*.bak

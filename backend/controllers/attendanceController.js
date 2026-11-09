@@ -192,7 +192,31 @@ const unlockSectionDate = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
+/* ═══════════════════════════════════════════════════════════════════
+   DRILL-DOWN controllers
+   ═══════════════════════════════════════════════════════════════════ */
+
+const overview = async (req, res, next) => {
+  try {
+    const date = req.query.date || new Date().toISOString().slice(0, 10);
+    const sections = await AttendanceModel.sectionsOverview(date);
+    return apiResponse(res, 200, true, 'Overview', { date, sections });
+  } catch (e) { next(e); }
+};
+
+const sectionDetail = async (req, res, next) => {
+  try {
+    const sectionId = Number(req.params.sectionId);
+    const date = req.query.date || new Date().toISOString().slice(0, 10);
+    const students = await AttendanceModel.sectionRoster(sectionId, date);
+    return apiResponse(res, 200, true, 'Section detail',
+      { sectionId, date, students });
+  } catch (e) { next(e); }
+};
+
+
 module.exports = {
+overview, sectionDetail,
   markAttendance, bulkMarkAttendance, updateRemarks,
   getAttendanceByDate, getStudentAttendance, getStudentSummary, getClassSummary,
   getMyAttendance, getMySummary, unlockSectionDate,

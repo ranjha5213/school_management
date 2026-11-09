@@ -172,8 +172,6 @@ CREATE TABLE parent_students (
 );
 CREATE INDEX idx_parent_students_student ON parent_students(student_id);
 
--- Role sanity triggers: teachers.user_id must be role='teacher',
--- students.user_id must be role='student'.
 CREATE TRIGGER trg_teachers_user_role
 BEFORE INSERT ON teachers
 FOR EACH ROW
@@ -191,22 +189,42 @@ BEGIN
 END;
 
 -- ─── ATTENDANCE ──────────────────────────────────────────────
+-- CHANGES vs original:
+--   1. status CHECK now includes 'leave' (frontend uses it)
+--   2. UNIQUE (student_id, date) → partial unique index on superseded_by IS NULL
+--      so re-marking (supersede pattern) can insert a new active row
+--   3. Added partial indexes on date/student_id for active rows only
 CREATE TABLE attendance (
     id              INTEGER      PRIMARY KEY AUTOINCREMENT,
     student_id      INTEGER      NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     date            DATE         NOT NULL,
     status          VARCHAR(10)  NOT NULL
-                    CHECK (status IN ('present','absent','late','excused')),
+                    CHECK (status IN ('present','absent','late','excused','leave')),
     remarks         VARCHAR(255),
     marked_by       INTEGER      REFERENCES users(id)      ON DELETE SET NULL,
     superseded_by   INTEGER      REFERENCES attendance(id) ON DELETE SET NULL,
     marked_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    superseded_at   DATETIME,
-    UNIQUE (student_id, date)
+    superseded_at   DATETIME
 );
+
+-- Active-only unique: exactly one current record per (student, date).
+-- Superseded rows are unlimited so the audit log keeps full history.
+CREATE UNIQUE INDEX uq_attendance_active
+    ON attendance(student_id, date)
+    WHERE superseded_by IS NULL;
+
 CREATE INDEX idx_attendance_date      ON attendance(date);
 CREATE INDEX idx_attendance_student   ON attendance(student_id);
 CREATE INDEX idx_attendance_marked_by ON attendance(marked_by);
+
+-- Partial indexes for the drill-down queries (only touch live rows).
+CREATE INDEX idx_attendance_date_active
+    ON attendance(date)
+    WHERE superseded_by IS NULL;
+
+CREATE INDEX idx_attendance_student_date_active
+    ON attendance(student_id, date)
+    WHERE superseded_by IS NULL;
 
 -- ─── COMMUNICATION ───────────────────────────────────────────
 CREATE TABLE notices (
@@ -254,6 +272,34 @@ CREATE TABLE materials (
 CREATE INDEX idx_materials_kind     ON materials(kind);
 CREATE INDEX idx_materials_class    ON materials(class_id, section_id);
 CREATE INDEX idx_materials_uploader ON materials(uploaded_by);
+
+-- ─── SMS LOG ─────────────────────────────────────────────────
+CREATE TABLE sms_log (
+    id           INTEGER  PRIMARY KEY AUTOINCREMENT,
+    to_phone     TEXT     NOT NULL,
+    body         TEXT     NOT NULL,
+    kind         TEXT     NOT NULL
+                 CHECK (kind IN ('attendance','mcq_result','fee_reminder','custom')),
+    student_id   INTEGER  REFERENCES students(id) ON DELETE SET NULL,
+    ref_id       INTEGER,
+    sent_on      DATE     NOT NULL DEFAULT (date('now')),
+    status       TEXT     NOT NULL DEFAULT 'queued'
+                 CHECK (status IN ('queued','sent','failed','skipped')),
+    error        TEXT,
+    attempts     INTEGER  NOT NULL DEFAULT 0,
+    sent_at      DATETIME,
+    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at   DATETIME
+);
+CREATE INDEX idx_sms_student ON sms_log(student_id);
+CREATE INDEX idx_sms_phone   ON sms_log(to_phone);
+CREATE INDEX idx_sms_status  ON sms_log(status, created_at);
+CREATE INDEX idx_sms_ref     ON sms_log(kind, ref_id);
+CREATE INDEX idx_sms_date    ON sms_log(sent_on);
+
+CREATE UNIQUE INDEX uq_sms_student_kind_day
+    ON sms_log(kind, student_id, sent_on)
+    WHERE status IN ('queued','sent') AND student_id IS NOT NULL;
 
 -- ─── EXAMS (marks-based) ─────────────────────────────────────
 CREATE TABLE exam_types (
@@ -325,9 +371,6 @@ CREATE UNIQUE INDEX uq_teacher_slot
     ON timetables(teacher_id, day_of_week, start_time)
     WHERE is_active = 1 AND teacher_id IS NOT NULL;
 
--- Subject↔section class consistency for timetables. Controller already
--- enforces this; the trigger makes it impossible to bypass with a
--- direct INSERT or UPDATE.
 CREATE TRIGGER trg_timetable_subject_class_insert
 BEFORE INSERT ON timetables
 FOR EACH ROW
@@ -636,4 +679,12 @@ FOR EACH ROW
 WHEN NEW.updated_at IS OLD.updated_at OR NEW.updated_at IS NULL
 BEGIN
     UPDATE system_settings SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER trg_sms_log_updated_at
+AFTER UPDATE ON sms_log
+FOR EACH ROW
+WHEN NEW.updated_at IS OLD.updated_at OR NEW.updated_at IS NULL
+BEGIN
+    UPDATE sms_log SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;

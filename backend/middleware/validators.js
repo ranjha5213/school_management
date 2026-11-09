@@ -35,7 +35,7 @@ const normalizeDayForValidation = (d) => {
 const validateRegister = [
   body('name').trim().notEmpty().withMessage('Name required'),
   body('email').isEmail().withMessage('Valid email required'),
-  body('password').isLength({ min: 6 }).withMessage('Password min 6 chars'),
+  body('password').isLength({ min: 8 }).withMessage('Password min 8 chars'),
   body('role').optional().isIn(PUBLIC_ROLES),
   handleValidation,
 ];
@@ -49,7 +49,7 @@ const validateLogin = [
 const validateStaffRegister = [
   body('name').trim().notEmpty(),
   body('email').isEmail(),
-  body('password').isLength({ min: 6 }),
+  body('password').isLength({ min:8 }),
   body('role').isIn(STAFF_ROLES),
   handleValidation,
 ];
@@ -87,7 +87,7 @@ const validateVerifyRegisterOtp = [
 const validateStudent = [
   body('name').trim().notEmpty(),
   body('email').isEmail(),
-  body('password').isLength({ min: 6 }),
+  body('password').isLength({ min: 8 }),
   body('gender').optional().isIn(GENDERS),
   handleValidation,
 ];

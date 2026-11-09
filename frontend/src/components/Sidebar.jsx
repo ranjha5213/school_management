@@ -1,13 +1,17 @@
-import { NavLink } from 'react-router-dom';
-import { X } from 'lucide-react';
+import { useState } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
+import { X, ChevronDown, ChevronRight, CheckSquare, Eye } from 'lucide-react';
 import {
   LayoutDashboard, CalendarCheck, Users, GraduationCap, BookOpen,
   FileText, DollarSign, Library as LibraryIcon, ClipboardList, Bell, User,
-  School, UserCheck, Award, Upload,
+  School, UserCheck, Award,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 
+// NOTE: `Attendance` is intentionally NOT in these arrays for admin/teacher —
+// it's rendered as a collapsible submenu below. Students get `My Attendance`
+// as a top-level link instead.
 const NAV_BY_ROLE = {
   admin: [
     { to: '/dashboard',      label: 'Dashboard',     icon: LayoutDashboard },
@@ -15,7 +19,7 @@ const NAV_BY_ROLE = {
     { to: '/classes',        label: 'Classes',       icon: School },
     { to: '/students',       label: 'Students',      icon: Users },
     { to: '/teachers',       label: 'Teachers',      icon: GraduationCap },
-    { to: '/attendance',     label: 'Attendance',    icon: CalendarCheck },
+    // Attendance is rendered specially below (collapsible submenu)
     { to: '/exams',          label: 'Exams',         icon: FileText },
     { to: '/mcq',            label: 'MCQ Tests',     icon: FileText },
     { to: '/homework',       label: 'Homework',      icon: ClipboardList },
@@ -30,7 +34,7 @@ const NAV_BY_ROLE = {
     { to: '/classes',        label: 'Classes',       icon: School },
     { to: '/students',       label: 'Students',      icon: Users },
     { to: '/teachers',       label: 'Teachers',      icon: GraduationCap },
-    { to: '/attendance',     label: 'Attendance',    icon: CalendarCheck },
+    // Attendance is rendered specially below (collapsible submenu)
     { to: '/exams',          label: 'Exams',         icon: FileText },
     { to: '/mcq',            label: 'MCQ Tests',     icon: FileText },
     { to: '/homework',       label: 'Homework',      icon: ClipboardList },
@@ -41,6 +45,7 @@ const NAV_BY_ROLE = {
   ],
   student: [
     { to: '/dashboard',      label: 'Dashboard',     icon: LayoutDashboard },
+    { to: '/my-attendance',  label: 'My Attendance', icon: CalendarCheck },  // NEW
     { to: '/mcq',            label: 'My Tests',      icon: FileText },
     { to: '/my-results',     label: 'My Results',    icon: Award },
     { to: '/homework',       label: 'Homework',      icon: ClipboardList },
@@ -59,14 +64,30 @@ const NAV_BY_ROLE = {
 export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
   const { user } = useAuth();
   const { school_name } = useSettings();
+  const location = useLocation();
 
-  const nav = NAV_BY_ROLE[user?.role] || NAV_BY_ROLE.student;
+  const role = user?.role;
+  const hasAttendanceMenu = role === 'admin' || role === 'teacher';
+
+  // Auto-open the attendance submenu if we're already on an attendance route
+  const [attendanceOpen, setAttendanceOpen] = useState(
+    location.pathname.startsWith('/attendance')
+  );
+
+  const nav = NAV_BY_ROLE[role] || NAV_BY_ROLE.student;
 
   const linkClass = ({ isActive }) =>
     `flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition ${
       isActive
         ? 'bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-300 font-medium'
         : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+    }`;
+
+  const subLinkClass = ({ isActive }) =>
+    `flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition ${
+      isActive
+        ? 'bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-300'
+        : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
     }`;
 
   const content = (
@@ -84,6 +105,40 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
             {label}
           </NavLink>
         ))}
+
+        {/* Collapsible Attendance submenu — admin & teacher only */}
+        {hasAttendanceMenu && (
+          <div>
+            <button
+              type="button"
+              onClick={() => setAttendanceOpen((v) => !v)}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition ${
+                location.pathname.startsWith('/attendance')
+                  ? 'bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-300 font-medium'
+                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <span className="flex items-center gap-2.5">
+                <CalendarCheck className="w-4 h-4" />
+                Attendance
+              </span>
+              {attendanceOpen
+                ? <ChevronDown className="w-4 h-4" />
+                : <ChevronRight className="w-4 h-4" />}
+            </button>
+
+            {attendanceOpen && (
+              <div className="ml-5 mt-0.5 pl-2 border-l border-slate-200 dark:border-slate-800 flex flex-col gap-0.5">
+                <NavLink to="/attendance/view" className={subLinkClass} onClick={onClose}>
+                  <Eye className="w-3.5 h-3.5" /> View Attendance
+                </NavLink>
+                <NavLink to="/attendance" className={subLinkClass} onClick={onClose}>
+                  <CheckSquare className="w-3.5 h-3.5" /> Mark Attendance
+                </NavLink>
+              </div>
+            )}
+          </div>
+        )}
       </nav>
     </>
   );

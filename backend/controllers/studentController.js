@@ -68,12 +68,52 @@ const updateStudent = async (req, res, next) => {
 
 const deleteStudent = async (req, res, next) => {
   try {
-    await StudentModel.remove(Number(req.params.studentId));
+    const studentId = Number(req.params.id);
+    
+    // Guard against NaN or invalid IDs
+    if (isNaN(studentId)) {
+      return apiResponse(res, 400, false, 'Invalid student ID provided');
+    }
+
+    const cascade = req.query.cascade === 'true' || req.query.cascade === true;
+
+    // Assuming StudentModel.remove returns the number of affected rows or a boolean
+    const deleted = await StudentModel.remove(studentId, cascade);
+    
+    // If the database deleted 0 rows, tell the frontend it wasn't found
+    if (!deleted) {
+       return apiResponse(res, 404, false, 'Student not found');
+    }
+
     return apiResponse(res, 200, true, 'Student deleted');
   } catch (e) { next(e); }
 };
 
+const suspendStudent = async (req, res, next) => {
+  try {
+    const studentId = Number(req.params.studentId);
+    
+    // Use model method or update status fields via StudentModel
+    await StudentModel.update(studentId, { status: 'suspended', is_active: 0 });
+    return apiResponse(res, 200, true, 'Student suspended successfully');
+  } catch (e) { 
+    next(e); 
+  }
+};
+
+const readmitStudent = async (req, res, next) => {
+  try {
+    const studentId = Number(req.params.studentId);
+    
+    await StudentModel.update(studentId, { status: 'active', is_active: 1 });
+    return apiResponse(res, 200, true, 'Student readmitted successfully');
+  } catch (e) { 
+    next(e); 
+  }
+};
+
 module.exports = {
   listStudents, createStudent, getStudentOverview, getStudentAttendance,
-  updateStudent, deleteStudent,
+  updateStudent, deleteStudent, suspendStudent, readmitStudent,
 };
+

@@ -162,6 +162,13 @@ export default function TakeMcq() {
   const submit = useCallback(async (auto = false) => {
     if (!attempt?.id || submitRef.current) return;
 
+    // Manual submit: confirm with the student; Cancel aborts entirely.
+    // Auto-submit (timer expiry): no prompt, always notify so the
+    // guardian is not left uninformed.
+    if (!auto) {
+      if (!window.confirm('Submit and SMS result to your guardian?')) return;
+    }
+
     if (!auto) {
       const answeredCount = Object.keys(answers).length;
       const msg = answeredCount < questions.length
@@ -173,7 +180,7 @@ export default function TakeMcq() {
     submitRef.current = true;
     setSubmitting(true);
     try {
-      const res = await mcqApi.submitAttempt(attempt.id, answers);
+      const res = await mcqApi.submitAttempt(attempt.id, answers, { sms: true });
       setResult(res?.data ?? res);
       try {
         if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop();

@@ -2,7 +2,7 @@ module.exports = {
   PUBLIC_ROLES: ['student', 'parent', 'teacher', 'accountant'],
   STAFF_ROLES: ['admin', 'teacher', 'accountant'],
   ALL_ROLES: ['admin', 'teacher', 'accountant', 'student', 'parent'],
-  ATTENDANCE_STATUSES: ['present', 'absent', 'late', 'excused'],
+  ATTENDANCE_STATUSES: ['present', 'absent', 'late', 'excused','leave'],
   GENDERS: ['male', 'female', 'other'],
   PAYMENT_METHODS: ['cash', 'card', 'bank_transfer', 'online', 'cheque'],
   DAYS_OF_WEEK: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],

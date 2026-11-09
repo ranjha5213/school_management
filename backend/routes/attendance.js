@@ -12,6 +12,8 @@ router.post('/bulk', authorize('admin', 'teacher'), c.bulkMarkAttendance);
 router.patch('/remarks', authorize('admin', 'teacher'), validateRemarksUpdate, c.updateRemarks);
 router.patch('/', authorize('admin', 'teacher'), c.updateAttendance);
 router.get('/date', authorize('admin', 'teacher'), c.getAttendanceByDate);
+router.get('/overview',           authorize('admin', 'teacher'), c.overview);
+router.get('/section/:sectionId', authorize('admin', 'teacher'), c.sectionDetail);
 router.get('/student/:studentId', requireStudentAccess('studentId'), c.getStudentAttendance);
 router.get('/summary/:studentId', requireStudentAccess('studentId'), c.getStudentSummary);
 router.get('/class-summary', authorize('admin', 'teacher'), c.getClassSummary);

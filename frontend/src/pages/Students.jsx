@@ -41,7 +41,8 @@ export default function Students() {
       if (classList) {
         for (const cls of classList) {
           const secs = await classesApi.sections(cls.id).catch(() => []);
-          allSections.push(...(secs || []).map((s) => ({ ...s, className: cls.name })));
+    allSections.push(...(secs || []).map((s) => ({ ...s, className: cls.class_name, name: s.section_name })));
+
         }
       }
       setSections(allSections);
@@ -97,7 +98,11 @@ export default function Students() {
       )
     : rows;
 
-  const currentSectionName = sections.find((s) => s.id === selectedSectionId)?.name || 'General';
+  const currentSectionName = (() => {
+  const sec = sections.find((s) => s.id === selectedSectionId);
+  return sec ? `${sec.className} - ${sec.section_name}` : 'General';
+})();
+
 
   return (
     <div className="space-y-4 animate-fade-in">
