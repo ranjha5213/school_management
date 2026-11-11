@@ -101,6 +101,7 @@ const updateTeacher = async (req, res, next) => {
     const {
       name, email, phone,
       employee_code, department_id, qualification, join_date, salary_cents,
+      permissions, // 👈 ADDED: Capture permissions from frontend
     } = req.body;
 
     // Check employee_code uniqueness
@@ -124,6 +125,13 @@ const updateTeacher = async (req, res, next) => {
     if (qualification !== undefined) teacher_patch.qualification = qualification || null;
     if (join_date !== undefined) teacher_patch.join_date = join_date || null;
     if (salary_cents !== undefined) teacher_patch.salary_cents = Number(salary_cents) || 0;
+    
+    // 👇 ADDED: Convert permissions object to JSON string for database storage
+    if (permissions !== undefined) {
+      teacher_patch.permissions = typeof permissions === 'object' 
+        ? JSON.stringify(permissions) 
+        : permissions;
+    }
 
     if (Object.keys(teacher_patch).length) {
       await TeacherModel.update(id, teacher_patch);

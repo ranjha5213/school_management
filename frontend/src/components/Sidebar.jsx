@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
-  X, ChevronDown, ChevronRight, CheckSquare, Eye, Plus, Pencil,
+  X, ChevronDown, ChevronRight, CheckSquare, Eye, Plus, Pencil, Settings,
 } from 'lucide-react';
 import {
   LayoutDashboard, CalendarCheck, Users, GraduationCap, BookOpen,
@@ -30,6 +30,7 @@ const NAV_BY_ROLE = {
     { to: '/library',        label: 'Library',       icon: LibraryIcon },
     { to: '/notices',        label: 'Notices',       icon: Bell },
     { to: '/profile',        label: 'Profile',       icon: User },
+    { to: '/settings',       label: 'Settings',      icon: Settings }, // 👈 Added Settings for Admin
   ],
   teacher: [
     { to: '/dashboard',      label: 'Dashboard',     icon: LayoutDashboard },

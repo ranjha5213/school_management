@@ -33,7 +33,7 @@ const AttendanceModel = {
   findByDate: (date, section_id) => {
     if (section_id) {
       return all(
-        `SELECT a.*, u.name AS student_name, s.roll_number,
+        `SELECT a.*, u.name AS student_name,u.phone, s.roll_number,
                 m.name AS marked_by_name
          FROM attendance a
          JOIN students s ON a.student_id = s.id
@@ -191,6 +191,7 @@ const AttendanceModel = {
          s.id                              AS studentId,
          u.name                            AS name,
          s.roll_number                     AS rollNumber,
+         u.phone                            AS phone,
          COALESCE(a.status, 'unmarked')    AS status,
          a.remarks                         AS remarks
        FROM students s

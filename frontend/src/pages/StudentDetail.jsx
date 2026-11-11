@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Mail, Hash, BookOpen, DollarSign, ClipboardList,
-  FileText, CalendarCheck,
+  FileText, CalendarCheck, Phone,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Card from '../components/Card';
@@ -49,6 +49,12 @@ export default function StudentDetail() {
             <h2 className="text-lg font-semibold">{profile.name}</h2>
             <div className="text-sm text-slate-500 mt-1 flex flex-wrap gap-3">
               <span className="flex items-center gap-1"><Mail className="w-3.5 h-3.5" />{profile.email}</span>
+              
+              {/* 👇 ADDED PHONE NUMBER HERE 👇 */}
+              {profile.phone && (
+                <span className="flex items-center gap-1"><Phone className="w-3.5 h-3.5" />{profile.phone}</span>
+              )}
+
               <span className="flex items-center gap-1"><Hash className="w-3.5 h-3.5" />Adm {profile.admission_number}</span>
               <span className="flex items-center gap-1"><BookOpen className="w-3.5 h-3.5" />{profile.class_name || '—'} — {profile.section_name || '—'}</span>
             </div>

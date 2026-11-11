@@ -31,6 +31,7 @@ import ReportCard from './pages/ReportCard';
 import Library from './pages/Library';
 import Notices from './pages/Notices';
 import Profile from './pages/Profile';
+import Settings from './pages/Settings'; // 👈 ADDED SETTINGS IMPORT
 
 // ─── Attendance drill-down pages ───
 import AttendanceOverview from './pages/AttendanceOverview';
@@ -163,6 +164,10 @@ export default function App() {
                   <Route path="notices" element={<Notices />} />
                   <Route path="notices/:noticeId" element={<Notices />} />
                   <Route path="profile" element={<Profile />} />
+                  
+                  {/* 👇 ADDED SETTINGS ROUTE */}
+                  <Route path="settings" element={<Protected adminOnly><Settings /></Protected>} />
+                  
                   <Route path="pending-users" element={<Protected adminOnly><PendingUsers /></Protected>} />
                 </Route>
 

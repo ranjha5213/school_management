@@ -41,8 +41,7 @@ export default function Students() {
       if (classList) {
         for (const cls of classList) {
           const secs = await classesApi.sections(cls.id).catch(() => []);
-    allSections.push(...(secs || []).map((s) => ({ ...s, className: cls.class_name, name: s.section_name })));
-
+          allSections.push(...(secs || []).map((s) => ({ ...s, className: cls.class_name, name: s.section_name })));
         }
       }
       setSections(allSections);
@@ -99,9 +98,9 @@ export default function Students() {
     : rows;
 
   const currentSectionName = (() => {
-  const sec = sections.find((s) => s.id === selectedSectionId);
-  return sec ? `${sec.className} - ${sec.section_name}` : 'General';
-})();
+    const sec = sections.find((s) => s.id === selectedSectionId);
+    return sec ? `${sec.className} - ${sec.section_name}` : 'General';
+  })();
 
 
   return (
@@ -161,6 +160,8 @@ export default function Students() {
               <thead className="bg-slate-50 dark:bg-slate-800">
                 <tr>
                   <th className="text-left p-3">Name</th>
+                  <th className="text-left p-3">Email</th>
+                  <th className="text-left p-3">Phone</th>
                   <th className="text-left p-3">Admission #</th>
                   <th className="text-left p-3">Roll</th>
                   <th className="text-left p-3">Class</th>
@@ -175,6 +176,8 @@ export default function Students() {
                     className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50"
                   >
                     <td className="p-3 font-medium">{r.student_name}</td>
+                    <td className="p-3 text-slate-500">{r.email || '—'}</td>
+                    <td className="p-3 text-slate-500">{r.phone || '—'}</td>
                     <td className="p-3 font-mono text-xs">{r.admission_number}</td>
                     <td className="p-3">{r.roll_number || '—'}</td>
                     <td className="p-3 text-slate-500">{r.class_name} · {r.section_name}</td>
@@ -396,4 +399,3 @@ export default function Students() {
     </div>
   );
 }
-

@@ -19,7 +19,7 @@ const STATUSES = [
   { id: 'absent',  label: 'Absent',   color: 'red',    icon: XCircle },
   { id: 'late',    label: 'Late',     color: 'yellow', icon: Clock },
   { id: 'excused', label: 'Excused',  color: 'gray',   icon: AlertCircle },
-  { id: 'leave',   label: 'On Leave', color: 'blue',   icon: CalendarOff },   // ← NEW
+  { id: 'leave',   label: 'On Leave', color: 'blue',   icon: CalendarOff },
 ];
 
 const chipActiveClass = {
@@ -27,7 +27,7 @@ const chipActiveClass = {
   red:    'bg-red-100 text-red-700 ring-2 ring-red-500 dark:bg-red-500/20 dark:text-red-300',
   yellow: 'bg-amber-100 text-amber-700 ring-2 ring-amber-500 dark:bg-amber-500/20 dark:text-amber-300',
   gray:   'bg-slate-200 text-slate-700 ring-2 ring-slate-500 dark:bg-slate-600/40 dark:text-slate-300',
-  blue:   'bg-blue-100 text-blue-700 ring-2 ring-blue-500 dark:bg-blue-500/20 dark:text-blue-300',   // ← NEW
+  blue:   'bg-blue-100 text-blue-700 ring-2 ring-blue-500 dark:bg-blue-500/20 dark:text-blue-300',
 };
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -38,7 +38,7 @@ const STATUS_TEXT_CLASS = {
   absent:  'text-red-600 font-medium',
   late:    'text-amber-600 font-medium',
   excused: 'text-slate-500 font-medium',
-  leave:   'text-blue-600 font-medium',   // ← NEW
+  leave:   'text-blue-600 font-medium',
 };
 
 function StudentAttendance() {
@@ -225,7 +225,7 @@ export default function Attendance() {
   };
 
   const counts = useMemo(() => {
-    const c = { present: 0, absent: 0, late: 0, excused: 0, leave: 0 };   // ← added leave
+    const c = { present: 0, absent: 0, late: 0, excused: 0, leave: 0 };
     Object.values(records).forEach((v) => { if (c[v] !== undefined) c[v]++; });
     return c;
   }, [records]);
@@ -303,7 +303,7 @@ export default function Attendance() {
               <Button size="sm" variant="secondary" onClick={() => markAll('absent')}>All Absent</Button>
               <Button size="sm" variant="secondary" onClick={() => markAll('late')}>All Late</Button>
               <Button size="sm" variant="secondary" onClick={() => markAll('excused')}>All Excused</Button>
-              <Button size="sm" variant="secondary" onClick={() => markAll('leave')}>All On Leave</Button>   {/* ← NEW */}
+              <Button size="sm" variant="secondary" onClick={() => markAll('leave')}>All On Leave</Button>
               <div className="flex-1" />
               <Button onClick={saveAll} loading={saving} icon={Save} className="bg-green-600 hover:bg-green-700">
                 Save Attendance
@@ -344,7 +344,15 @@ export default function Attendance() {
                       <td className="p-3 text-slate-500">{i + 1}</td>
                       <td className="p-3 font-mono text-xs">{s.admission_number}</td>
                       <td className="p-3 text-slate-500">{s.roll_number || '—'}</td>
-                      <td className="p-3 font-medium">{s.student_name}</td>
+                      
+                      {/* UPDATED: Student Name and Phone Number */}
+                      <td className="p-3">
+                        <div className="font-medium">{s.student_name}</div>
+                        <div className="text-xs text-slate-500">
+                          {s.phone ? `📞 ${s.phone}` : 'No phone'}
+                        </div>
+                      </td>
+
                       <td className="p-3">
                         <div className="flex justify-center gap-1.5 flex-wrap">
                           {STATUSES.map((st) => {

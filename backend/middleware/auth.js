@@ -47,4 +47,25 @@ const attachStudentId = async (req, res, next) => {
   } catch (e) { next(e); }
 };
 
-module.exports = { authenticate, authorize, attachStudentId };
+// middleware/auth.js
+const checkPermission = (permissionName) => {
+  return (req, res, next) => {
+    // Admins bypass all checks
+    if (req.user.role === 'admin') return next();
+
+    // If it's a teacher, check their specific permissions
+    if (req.user.role === 'teacher') {
+      // req.user should be populated with the teacher record (including permissions)
+      const perms = req.user.permissions ? JSON.parse(req.user.permissions) : {};
+      
+      if (perms[permissionName]) {
+        return next();
+      }
+      return res.status(403).json({ success: false, message: 'Forbidden: Missing permission' });
+    }
+
+    return res.status(403).json({ success: false, message: 'Forbidden: Not authorized' });
+  };
+};
+
+module.exports = { authenticate, authorize, attachStudentId,checkPermission };
