@@ -114,6 +114,15 @@ export default function Settings() {
               </div>
             </div>
           </label>
+
+            {/* 👇 Option 3: Period-wise */}
+  <label className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-colors ${mode === 'period' ? 'border-brand-500 bg-brand-50/50' : 'border-slate-200 hover:bg-slate-50'}`}>
+    <input type="radio" name="attendance_mode" value="period" checked={mode === 'period'} onChange={() => setMode('period')} className="mt-1 w-4 h-4 text-brand-600" />
+    <div>
+      <div className="font-semibold text-slate-800 dark:text-slate-200">Period-wise</div>
+      <div className="text-sm text-slate-500 mt-1">Mark attendance for specific class periods (e.g., Period 1 to 8).</div>
+    </div>
+  </label>
         </div>
 
         {/* Warning for changing settings mid-year */}

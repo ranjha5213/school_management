@@ -3,14 +3,14 @@ const { run, get, all } = require('../config/database');
 const AttendanceModel = {
 
   /* ────────────────────────────────
-     EXISTING METHODS (unchanged)
+     EXISTING METHODS (UPDATED)
      ──────────────────────────────── */
 
   insert: (d) =>
     run(
-      `INSERT INTO attendance (student_id, date, status, remarks, marked_by, marked_at)
-       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-      [d.student_id, d.date, d.status, d.remarks || null, d.marked_by || null]
+      `INSERT INTO attendance (student_id, date, status, remarks, marked_by, marked_at, session, period_number)
+       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)`,
+      [d.student_id, d.date, d.status, d.remarks || null, d.marked_by || null, d.session || 'full_day', d.period_number || null]
     ),
 
   bulkInsert: async (records, marked_by) => {
@@ -19,32 +19,55 @@ const AttendanceModel = {
     return out;
   },
 
-  sectionDateLocked: (section_id, date) =>
-    get(
-      `SELECT a.id, a.marked_by, a.marked_at, u.name AS marked_by_name
-       FROM attendance a
-       JOIN students s ON a.student_id = s.id
-       LEFT JOIN users u ON a.marked_by = u.id
-       WHERE s.section_id = ? AND a.date = ? AND a.superseded_by IS NULL
-       LIMIT 1`,
-      [section_id, date]
-    ),
-
-  findByDate: (date, section_id) => {
-    if (section_id) {
-      return all(
-        `SELECT a.*, u.name AS student_name,u.phone, s.roll_number,
-                m.name AS marked_by_name
-         FROM attendance a
-         JOIN students s ON a.student_id = s.id
-         JOIN users u ON s.user_id = u.id
-         LEFT JOIN users m ON a.marked_by = m.id
-         WHERE a.date = ? AND s.section_id = ? AND a.superseded_by IS NULL
-         ORDER BY u.name`,
-        [date, section_id]
-      );
+  sectionDateLocked: (section_id, date, session = 'full_day') => {
+    let sql = `SELECT a.id, a.marked_by, a.marked_at, u.name AS marked_by_name
+               FROM attendance a
+               JOIN students s ON a.student_id = s.id
+               LEFT JOIN users u ON a.marked_by = u.id
+               WHERE s.section_id = ? AND a.date = ? AND a.superseded_by IS NULL`;
+    const params = [section_id, date];
+    
+    if (session.startsWith('p')) {
+      sql += ` AND a.period_number = ?`;
+      params.push(parseInt(session.replace('p', '')));
+    } else {
+      sql += ` AND a.session = ?`;
+      params.push(session);
     }
-    return all(`SELECT * FROM attendance WHERE date = ?`, [date]);
+    
+    sql += ` LIMIT 1`;
+    return get(sql, params);
+  },
+
+  findByDate: (date, section_id, session = 'full_day') => {
+    let sql = `SELECT a.*, u.name AS student_name, u.phone, s.roll_number,
+                      m.name AS marked_by_name
+               FROM attendance a
+               JOIN students s ON a.student_id = s.id
+               JOIN users u ON s.user_id = u.id
+               LEFT JOIN users m ON a.marked_by = m.id
+               WHERE a.date = ? AND a.superseded_by IS NULL`;
+    const params = [date];
+
+    if (section_id) {
+      sql += ` AND s.section_id = ?`;
+      params.push(section_id);
+    }
+
+    if (session.startsWith('p')) {
+      sql += ` AND a.period_number = ?`;
+      params.push(parseInt(session.replace('p', '')));
+    } else {
+      sql += ` AND a.session = ?`;
+      params.push(session);
+    }
+
+    sql += ` ORDER BY u.name`;
+
+    if (section_id) return all(sql, params);
+    
+    // Fallback for global daily list (ignoring section filter)
+    return all(sql.replace(` AND s.section_id = ?`, ''), params.slice(1));
   },
 
   updateRemarks: (student_id, date, remarks, user_id) =>
@@ -56,7 +79,6 @@ const AttendanceModel = {
       [remarks || null, student_id, date, user_id, user_id]
     ),
 
-  // FIXED: removed duplicated "superseded_by IS NULL AND superseded_by IS NULL"
   findByStudent: (student_id, { from, to, limit = 100 } = {}) => {
     let sql = `SELECT * FROM attendance WHERE student_id = ? AND superseded_by IS NULL`;
     const p = [student_id];
@@ -102,21 +124,37 @@ const AttendanceModel = {
        FROM attendance WHERE date = DATE('now') AND superseded_by IS NULL`
     ),
 
-  supersedeBySectionDate: async (section_id, date, by_user_id) => {
-    const row = await get(
-      `SELECT COUNT(*) AS c FROM attendance a
-         JOIN students s ON a.student_id = s.id
-        WHERE s.section_id = ? AND a.date = ? AND a.superseded_by IS NULL`,
-      [section_id, date]
-    );
-    await run(
-      `UPDATE attendance
-          SET superseded_by = ?, superseded_at = CURRENT_TIMESTAMP
-        WHERE date = ?
-          AND superseded_by IS NULL
-          AND student_id IN (SELECT id FROM students WHERE section_id = ?)`,
-      [by_user_id || null, date, section_id]
-    );
+  supersedeBySectionDate: async (section_id, date, by_user_id, session = 'full_day') => {
+    let sql = `SELECT COUNT(*) AS c FROM attendance a
+               JOIN students s ON a.student_id = s.id
+               WHERE s.section_id = ? AND a.date = ? AND a.superseded_by IS NULL`;
+    let params = [section_id, date];
+    
+    if (session.startsWith('p')) {
+      sql += ` AND a.period_number = ?`;
+      params.push(parseInt(session.replace('p', '')));
+    } else {
+      sql += ` AND a.session = ?`;
+      params.push(session);
+    }
+
+    const row = await get(sql, params);
+
+    let updateSql = `UPDATE attendance
+                     SET superseded_by = ?, superseded_at = CURRENT_TIMESTAMP
+                     WHERE date = ? AND superseded_by IS NULL
+                     AND student_id IN (SELECT id FROM students WHERE section_id = ?)`;
+    let updateParams = [by_user_id || null, date, section_id];
+
+    if (session.startsWith('p')) {
+      updateSql += ` AND period_number = ?`;
+      updateParams.push(parseInt(session.replace('p', '')));
+    } else {
+      updateSql += ` AND session = ?`;
+      updateParams.push(session);
+    }
+
+    await run(updateSql, updateParams);
     return row?.c || 0;
   },
 
@@ -136,13 +174,9 @@ const AttendanceModel = {
     ),
 
   /* ────────────────────────────────
-     DRILL-DOWN METHODS (new)
+     DRILL-DOWN METHODS
      ──────────────────────────────── */
 
-  /**
-   * LEVEL 1: every section's present/absent/leave counts for one date.
-   * Returns one row per section, joined to its class name.
-   */
   sectionsOverview: async (date) => {
     const rows = await all(
       `SELECT
@@ -181,28 +215,34 @@ const AttendanceModel = {
     }));
   },
 
-  /**
-   * LEVEL 2: one section, one date → every student's status.
-   * Student names come from users.name (canonical), not name_en.
-   */
-  sectionRoster: async (sectionId, date) => {
-    return all(
-      `SELECT
-         s.id                              AS studentId,
-         u.name                            AS name,
-         s.roll_number                     AS rollNumber,
-         u.phone                            AS phone,
-         COALESCE(a.status, 'unmarked')    AS status,
-         a.remarks                         AS remarks
-       FROM students s
-       JOIN users u ON u.id = s.user_id
-       LEFT JOIN attendance a ON a.student_id = s.id
-                             AND a.date = ?
-                             AND a.superseded_by IS NULL
-       WHERE s.section_id = ?
-       ORDER BY (s.roll_number IS NULL), s.roll_number ASC, u.name ASC`,
-      [date, sectionId]
-    );
+  sectionRoster: async (sectionId, date, session = 'full_day') => {
+    let sql = `SELECT
+                 s.id                              AS studentId,
+                 u.name                            AS name,
+                 s.roll_number                     AS rollNumber,
+                 u.phone                           AS phone,
+                 COALESCE(a.status, 'unmarked')    AS status,
+                 a.remarks                         AS remarks
+               FROM students s
+               JOIN users u ON u.id = s.user_id
+               LEFT JOIN attendance a ON a.student_id = s.id
+                                     AND a.date = ?`;
+    const params = [date];
+
+    if (session.startsWith('p')) {
+      sql += ` AND a.period_number = ?`;
+      params.push(parseInt(session.replace('p', '')));
+    } else {
+      sql += ` AND a.session = ?`;
+      params.push(session);
+    }
+
+    sql += ` AND a.superseded_by IS NULL
+             WHERE s.section_id = ?
+             ORDER BY (s.roll_number IS NULL), s.roll_number ASC, u.name ASC`;
+    params.push(sectionId);
+
+    return all(sql, params);
   },
 
 };

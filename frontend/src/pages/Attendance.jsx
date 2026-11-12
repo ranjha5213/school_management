@@ -1,18 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   CalendarCheck, Save, CheckCircle2, XCircle, Clock, AlertCircle,
-  Users, BookOpen, Layers, Lock, CalendarOff,
+  Users, BookOpen, Layers, Lock, CalendarOff, ArrowDownAZ, ListOrdered, RefreshCw
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Card from '../components/Card';
 import Input from '../components/Input';
 import Button from '../components/Button';
 import Empty from '../components/Empty';
-import PrintHeader from '../components/PrintHeader'; // 👈 ADDED
-import PrintShare from '../components/PrintShare';   // 👈 ADDED
+import PrintHeader from '../components/PrintHeader'; 
+import PrintShare from '../components/PrintShare';   
 import { attendanceApi, studentsApi, classesApi } from '../api/endpoints';
 import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
+import client from '../api/client';
 
 import Loader from "../components/Loader";
 
@@ -62,7 +63,12 @@ function StudentAttendance() {
         <ul className="divide-y divide-slate-200 dark:divide-slate-700">
           {rows.map((r) => (
             <li key={r.id} className="px-4 py-2 flex items-center justify-between text-sm">
-              <span className="font-mono">{r.date}</span>
+              <span className="font-mono">
+                {r.date} 
+                {r.session !== 'full_day' && r.session !== 'morning' && r.session !== 'afternoon' && ` (Period ${r.period_number})`}
+                {r.session === 'morning' && ` (Morning)`}
+                {r.session === 'afternoon' && ` (Afternoon)`}
+              </span>
               <span className={STATUS_TEXT_CLASS[r.status] || 'text-slate-500'}>
                 {r.status}
               </span>
@@ -84,6 +90,13 @@ export default function Attendance() {
   const [sectionId, setSectionId] = useState('');
   const [date, setDate] = useState(todayISO());
 
+  // Settings & Filter State
+  const [attendanceMode, setAttendanceMode] = useState('once');
+  const [session, setSession] = useState('full_day');
+  const [period, setPeriod] = useState(1);
+  const [sortBy, setSortBy] = useState('roll');
+  const [showFilters, setShowFilters] = useState(true);
+
   const [students, setStudents] = useState([]);
   const [records, setRecords] = useState({});
   const [lock, setLock] = useState(null);
@@ -94,6 +107,19 @@ export default function Attendance() {
   const [loaded, setLoaded] = useState(false);
 
   const { socket } = useSocket();
+
+  // 1. Fetch Settings on Load
+  useEffect(() => {
+    client.get('/settings').then((res) => {
+      const settings = res.data?.data || res.data || [];
+      const modeSetting = settings.find((s) => s.key === 'attendance_mode');
+      if (modeSetting) {
+        setAttendanceMode(modeSetting.value);
+        if (modeSetting.value === 'once') setSession('full_day');
+        else if (modeSetting.value === 'twice') setSession('morning');
+      }
+    }).catch(console.error);
+  }, []);
 
   // ─── Live section subscription ───
   useEffect(() => {
@@ -107,12 +133,12 @@ export default function Attendance() {
     const onMarked = (p) => {
       if (String(p.section_id) === String(sectionId) && p.date === date) {
         toast(`Attendance was submitted by ${p.marked_by_name || 'user'}`, { icon: '🔒' });
-        if (typeof loadGrid === 'function') loadGrid();
+        if (typeof loadGrid === 'function' && loaded) loadGrid();
       }
     };
     socket.on('attendance:marked', onMarked);
     return () => socket.off('attendance:marked', onMarked);
-  }, [socket, sectionId, date]);
+  }, [socket, sectionId, date, loaded]);
 
   const locked = !!lock;
 
@@ -142,7 +168,14 @@ export default function Attendance() {
     })();
   }, [classId]);
 
-  const loadGrid = async () => {
+  // Helper to determine the API session string
+  const getApiSession = () => {
+    if (attendanceMode === 'period') return `p${period}`;
+    if (attendanceMode === 'twice') return session;
+    return 'full_day';
+  };
+
+  const loadGrid = async (overrideSort = sortBy) => {
     if (!classId || !sectionId) return toast.error('Select class and section');
     if (date !== todayISO()) return toast.error('Attendance can only be marked for today');
 
@@ -150,9 +183,11 @@ export default function Attendance() {
     setLoaded(false);
     setLock(null);
     try {
+      const apiSession = getApiSession();
+      
       const [s, a] = await Promise.all([
-        studentsApi.byClassSection(classId, sectionId),
-        attendanceApi.byDate(date, sectionId).catch(() => ({ records: [], lock: null })),
+        studentsApi.list({ section_id: sectionId, sort: overrideSort }),
+        attendanceApi.byDate(date, sectionId, apiSession).catch(() => ({ records: [], lock: null })),
       ]);
 
       const list = Array.isArray(s) ? s : [];
@@ -168,6 +203,8 @@ export default function Attendance() {
       setLock(a?.lock || null);
 
       setLoaded(true);
+      setShowFilters(false); 
+      
       if (!list.length) toast('No students in this section yet');
       else if (a?.lock) toast(`Loaded — locked by ${a.lock.marked_by_name || 'user'} at ${a.lock.marked_at}`);
       else toast.success(`Loaded ${list.length} students`);
@@ -175,6 +212,14 @@ export default function Attendance() {
       toast.error(e.message);
     } finally {
       setLoadingStudents(false);
+    }
+  };
+
+  const handleSortChange = () => {
+    const newSort = sortBy === 'roll' ? 'name' : 'roll';
+    setSortBy(newSort);
+    if (loaded) {
+      loadGrid(newSort); 
     }
   };
 
@@ -199,6 +244,7 @@ export default function Attendance() {
 
     setSaving(true);
     try {
+      const apiSession = getApiSession();
       const payload = students.map((s) => ({
         student_id: s.id,
         date,
@@ -215,7 +261,7 @@ export default function Attendance() {
           )
         : false;
 
-      await attendanceApi.bulk(payload, sectionId, { sms: wantsSms });
+      await attendanceApi.bulk(payload, sectionId, { sms: wantsSms, session: apiSession });
       if (wantsSms) toast.success('Marked + SMS queued to guardians');
       toast.success(`Saved ${payload.length} records`);
       await loadGrid();
@@ -232,23 +278,25 @@ export default function Attendance() {
     return c;
   }, [records]);
 
-  // Helper to get class and section names for the print header
   const selectedClass = classes.find(c => String(c.id) === String(classId));
   const selectedSection = sections.find(s => String(s.id) === String(sectionId));
   const classAndSection = selectedClass && selectedSection 
     ? `${selectedClass.class_name} - Section ${selectedSection.section_name}` 
     : '';
 
+  const displaySession = attendanceMode === 'period' 
+    ? `Period ${period}` 
+    : (session === 'morning' ? 'Morning' : session === 'afternoon' ? 'Afternoon' : 'Full Day');
+
   return (
     <div className="space-y-4 animate-fade-in print-container">
-      {/* 👇 ADD PRINT HEADER HERE 👇 */}
       <PrintHeader 
         title={`Attendance Sheet`}
-        subtitle={loaded ? `Class: ${classAndSection} | Date: ${date}` : undefined}
+        subtitle={loaded ? `Class: ${classAndSection} | Date: ${date} | Session: ${displaySession}` : undefined}
       />
 
       <Card className="p-5">
-        <h3 className="font-semibold mb-4 flex items-center gap-2">
+        <h3 className="font-semibold mb-4 flex items-center gap-2 flex-wrap">
           <CalendarCheck className="w-4 h-4 text-brand-600" /> Mark Attendance
           {locked && (
             <span className="badge badge-gray ml-auto flex items-center gap-1">
@@ -257,62 +305,111 @@ export default function Attendance() {
             </span>
           )}
           
-          {/* 👇 ADD PRINT/SHARE BUTTONS HERE 👇 */}
           <div className="ml-auto flex items-center gap-2">
-            {loaded && <PrintShare title={`Attendance - ${classAndSection}`} text={`Attendance for ${date}`} />}
+            {loaded && (
+              <>
+                <Button 
+                  size="sm" 
+                  variant="secondary" 
+                  onClick={handleSortChange}
+                  className="flex items-center gap-1 no-print"
+                >
+                  {sortBy === 'roll' ? <><ListOrdered className="w-4 h-4"/> Roll</> : <><ArrowDownAZ className="w-4 h-4"/> A-Z</>}
+                </Button>
+                <PrintShare title={`Attendance - ${classAndSection}`} text={`Attendance for ${date}`} />
+                <Button 
+                  size="sm" 
+                  variant="secondary" 
+                  onClick={() => setShowFilters(true)}
+                  icon={RefreshCw}
+                  className="no-print"
+                >
+                  Change Class
+                </Button>
+              </>
+            )}
           </div>
         </h3>
 
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 no-print">
-          <div>
-            <label className="label flex items-center gap-1.5">
-              <BookOpen className="w-3.5 h-3.5 text-slate-400" /> Class
-            </label>
-            <select value={classId} onChange={(e) => setClassId(e.target.value)} className="input" disabled={loadingClasses}>
-              <option value="">{loadingClasses ? 'Loading…' : 'Select class'}</option>
-              {classes.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.class_name}{c.class_code ? ` (${c.class_code})` : ''}
+        {showFilters && (
+          <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 no-print">
+            <div>
+              <label className="label flex items-center gap-1.5">
+                <BookOpen className="w-3.5 h-3.5 text-slate-400" /> Class
+              </label>
+              <select value={classId} onChange={(e) => setClassId(e.target.value)} className="input" disabled={loadingClasses}>
+                <option value="">{loadingClasses ? 'Loading…' : 'Select class'}</option>
+                {classes.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.class_name}{c.class_code ? ` (${c.class_code})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="label flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-slate-400" /> Section
+              </label>
+              <select value={sectionId} onChange={(e) => setSectionId(e.target.value)} className="input" disabled={!classId || loadingSections}>
+                <option value="">
+                  {!classId ? 'Select class first'
+                    : loadingSections ? 'Loading…'
+                    : sections.length ? 'Select section'
+                    : 'No sections'}
                 </option>
-              ))}
-            </select>
-          </div>
+                {sections.map((s) => (
+                  <option key={s.id} value={s.id}>{s.section_name}</option>
+                ))}
+              </select>
+            </div>
 
-          <div>
-            <label className="label flex items-center gap-1.5">
-              <Layers className="w-3.5 h-3.5 text-slate-400" /> Section
-            </label>
-            <select value={sectionId} onChange={(e) => setSectionId(e.target.value)} className="input" disabled={!classId || loadingSections}>
-              <option value="">
-                {!classId ? 'Select class first'
-                  : loadingSections ? 'Loading…'
-                  : sections.length ? 'Select section'
-                  : 'No sections'}
-              </option>
-              {sections.map((s) => (
-                <option key={s.id} value={s.id}>{s.section_name}</option>
-              ))}
-            </select>
-          </div>
+            <Input
+              label="Date"
+              type="date"
+              value={date}
+              max={todayISO()}
+              onChange={(e) => setDate(e.target.value)}
+            />
 
-          <Input
-            label="Date"
-            type="date"
-            value={date}
-            max={todayISO()}
-            onChange={(e) => setDate(e.target.value)}
-          />
+            {/* Session Dropdown (Twice a Day) */}
+            {attendanceMode === 'twice' && (
+              <div>
+                <label className="label flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-slate-400" /> Session
+                </label>
+                <select value={session} onChange={(e) => setSession(e.target.value)} className="input">
+                  <option value="morning">Morning</option>
+                  <option value="afternoon">Afternoon</option>
+                </select>
+              </div>
+            )}
 
-          <div className="flex items-end">
-            <Button onClick={loadGrid} icon={Users} className="w-full" disabled={!classId || !sectionId || loadingStudents} loading={loadingStudents}>
-              Load Students
-            </Button>
+            {/* Period Dropdown (Period-wise) */}
+            {attendanceMode === 'period' && (
+              <div>
+                <label className="label flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-slate-400" /> Period
+                </label>
+                <select value={period} onChange={(e) => setPeriod(e.target.value)} className="input">
+                  {[1, 2, 3, 4, 5, 6, 7, 8].map(p => (
+                    <option key={p} value={p}>Period {p}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="flex items-end">
+              <Button onClick={() => loadGrid()} icon={Users} className="w-full" disabled={!classId || !sectionId || loadingStudents} loading={loadingStudents}>
+                Load Students
+              </Button>
+            </div>
           </div>
-        </div>
+        )}
       </Card>
 
       {!loaded ? (
-        <Card><Empty title="No attendance loaded" hint="Pick a class, section, and date, then click Load Students" /></Card>
+        <Card className="no-print"><Empty title="No attendance loaded" hint="Pick a class, section, and date, then click Load Students" /></Card>
       ) : students.length === 0 ? (
         <Card><Empty title="No students in this section" /></Card>
       ) : (
@@ -331,7 +428,7 @@ export default function Attendance() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 no-print">
             {STATUSES.map((s) => {
               const Icon = s.icon;
               return (
@@ -396,7 +493,6 @@ export default function Attendance() {
                         </div>
                       </td>
                       
-                      {/* For print only: Show the text status instead of buttons */}
                       <td className="p-3 hidden print:table-cell text-center font-bold uppercase">
                         {records[s.id]}
                       </td>
