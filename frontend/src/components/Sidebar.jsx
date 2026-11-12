@@ -30,7 +30,7 @@ const NAV_BY_ROLE = {
     { to: '/library',        label: 'Library',       icon: LibraryIcon },
     { to: '/notices',        label: 'Notices',       icon: Bell },
     { to: '/profile',        label: 'Profile',       icon: User },
-    { to: '/settings',       label: 'Settings',      icon: Settings }, // 👈 Added Settings for Admin
+    { to: '/settings',       label: 'Settings',      icon: Settings },
   ],
   teacher: [
     { to: '/dashboard',      label: 'Dashboard',     icon: LayoutDashboard },
@@ -70,7 +70,23 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
   const location = useLocation();
 
   const role = user?.role;
-  const hasAttendanceMenu = role === 'admin' || role === 'teacher';
+  const isAdmin = role === 'admin';
+
+  // 👇 Parse user permissions
+  let userPerms = {};
+  try { userPerms = JSON.parse(user.permissions || '{}'); } catch (e) {}
+
+  // 👇 Filter main navigation based on permissions
+  const rawNav = NAV_BY_ROLE[role] || NAV_BY_ROLE.student;
+  const nav = rawNav.filter((item) => {
+    if (isAdmin) return true; // Admin sees everything
+    if (item.to === '/students' && !userPerms.view_student) return false;
+    if (item.to === '/classes' && !userPerms.view_class) return false;
+    return true;
+  });
+
+  // 👇 Check specific submenu permissions
+  const hasAttendanceMenu = (role === 'admin' || role === 'teacher') && (isAdmin || userPerms.view_attendance);
   const hasTimetableMenu = role === 'admin' || role === 'teacher';
 
   // Auto-open submenus if we're already on a matching route
@@ -80,8 +96,6 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
   const [timetableOpen, setTimetableOpen] = useState(
     location.pathname.startsWith('/timetable')
   );
-
-  const nav = NAV_BY_ROLE[role] || NAV_BY_ROLE.student;
 
   const linkClass = ({ isActive }) =>
     `flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition ${
@@ -136,12 +150,19 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
 
             {attendanceOpen && (
               <div className="ml-5 mt-0.5 pl-2 border-l border-slate-200 dark:border-slate-800 flex flex-col gap-0.5">
-                <NavLink to="/attendance/view" className={subLinkClass} onClick={onClose}>
-                  <Eye className="w-3.5 h-3.5" /> View Attendance
-                </NavLink>
-                <NavLink to="/attendance" className={subLinkClass} onClick={onClose}>
-                  <CheckSquare className="w-3.5 h-3.5" /> Mark Attendance
-                </NavLink>
+                {/* 👇 Hide View Attendance if no permission */}
+                {(isAdmin || userPerms.view_attendance) && (
+                  <NavLink to="/attendance/view" className={subLinkClass} onClick={onClose}>
+                    <Eye className="w-3.5 h-3.5" /> View Attendance
+                  </NavLink>
+                )}
+                
+                {/* 👇 Hide Mark Attendance if no edit permission */}
+                {(isAdmin || userPerms.edit_attendance) && (
+                  <NavLink to="/attendance" className={subLinkClass} onClick={onClose}>
+                    <CheckSquare className="w-3.5 h-3.5" /> Mark Attendance
+                  </NavLink>
+                )}
               </div>
             )}
           </div>
@@ -173,12 +194,19 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
                 <NavLink to="/timetable/view" className={subLinkClass} onClick={onClose}>
                   <Eye className="w-3.5 h-3.5" /> View
                 </NavLink>
-                <NavLink to="/timetable/add" className={subLinkClass} onClick={onClose}>
-                  <Plus className="w-3.5 h-3.5" /> Add
-                </NavLink>
-                <NavLink to="/timetable/edit" className={subLinkClass} onClick={onClose}>
-                  <Pencil className="w-3.5 h-3.5" /> Edit
-                </NavLink>
+                
+                {/* 👇 Timetable Add/Edit typically requires admin, or you can add permissions for it later */}
+                {isAdmin && (
+                  <>
+                    <NavLink to="/timetable/add" className={subLinkClass} onClick={onClose}>
+                      <Plus className="w-3.5 h-3.5" /> Add
+                    </NavLink>
+                    <NavLink to="/timetable/edit" className={subLinkClass} onClick={onClose}>
+                      <Pencil className="w-3.5 h-3.5" /> Edit
+                    </NavLink>
+                  </>
+                )}
+                
                 <NavLink to="/timetable" className={subLinkClass} onClick={onClose} end>
                   <BookOpen className="w-3.5 h-3.5" /> Classic
                 </NavLink>

@@ -6,16 +6,23 @@ const router = express.Router();
 router.use(authenticate);
 
 // ─── Classes ───
-router.get('/', authorize('admin', 'teacher', 'accountant'), c.listClasses);
+router.get('/', 
+  authorize('admin', 'teacher', 'accountant'), 
+  checkPermission('view_class'), 
+  c.listClasses
+);
 
-// 👇 Added checkPermission for Teachers
 router.post('/', 
   authorize('admin', 'teacher'), 
   checkPermission('add_class'), 
   c.createClass
 );
 
-router.get('/:classId', authorize('admin', 'teacher', 'accountant'), c.getClass);
+router.get('/:classId', 
+  authorize('admin', 'teacher', 'accountant'), 
+  checkPermission('view_class'), // 👈 Added view permission
+  c.getClass
+);
 
 router.patch('/:classId', 
   authorize('admin', 'teacher'), 
@@ -30,7 +37,11 @@ router.delete('/:classId',
 );
 
 // ─── Sections of a class ───
-router.get('/:classId/sections', authorize('admin', 'teacher', 'accountant'), c.listSections);
+router.get('/:classId/sections', 
+  authorize('admin', 'teacher', 'accountant'), 
+  checkPermission('view_class'), // 👈 Added view permission
+  c.listSections
+);
 
 router.post('/:classId/sections', 
   authorize('admin', 'teacher'), 
@@ -63,6 +74,9 @@ router.post('/sections/:sectionId/students',
   c.addStudentToSection
 );
 
-router.get('/sections/:sectionId/students', authorize('admin', 'teacher', 'accountant'), c.listStudentsInSection);
+router.get('/sections/:sectionId/students', 
+  authorize('admin', 'teacher', 'accountant'), 
+  c.listStudentsInSection
+);
 
 module.exports = router;

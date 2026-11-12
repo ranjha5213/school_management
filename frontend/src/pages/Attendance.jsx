@@ -8,6 +8,8 @@ import Card from '../components/Card';
 import Input from '../components/Input';
 import Button from '../components/Button';
 import Empty from '../components/Empty';
+import PrintHeader from '../components/PrintHeader'; // 👈 ADDED
+import PrintShare from '../components/PrintShare';   // 👈 ADDED
 import { attendanceApi, studentsApi, classesApi } from '../api/endpoints';
 import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
@@ -32,7 +34,6 @@ const chipActiveClass = {
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
-// Map status → text color for the student's own view
 const STATUS_TEXT_CLASS = {
   present: 'text-emerald-600 font-medium',
   absent:  'text-red-600 font-medium',
@@ -53,7 +54,9 @@ function StudentAttendance() {
   if (!rows.length)  return <Empty title="No attendance records yet" hint="Your teacher hasn't marked attendance for you." />;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 print-container">
+      <PrintHeader title="My Attendance Record" subtitle="Personal attendance history" />
+      
       <h1 className="text-lg font-semibold">My Attendance</h1>
       <Card className="p-0">
         <ul className="divide-y divide-slate-200 dark:divide-slate-700">
@@ -202,7 +205,6 @@ export default function Attendance() {
         status: records[s.id],
       }));
 
-      // Prompt: if any students are absent/late, ask whether to notify guardians.
       const absent = payload.filter(
         (r) => r.status === 'absent' || r.status === 'late'
       ).length;
@@ -230,8 +232,21 @@ export default function Attendance() {
     return c;
   }, [records]);
 
+  // Helper to get class and section names for the print header
+  const selectedClass = classes.find(c => String(c.id) === String(classId));
+  const selectedSection = sections.find(s => String(s.id) === String(sectionId));
+  const classAndSection = selectedClass && selectedSection 
+    ? `${selectedClass.class_name} - Section ${selectedSection.section_name}` 
+    : '';
+
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-4 animate-fade-in print-container">
+      {/* 👇 ADD PRINT HEADER HERE 👇 */}
+      <PrintHeader 
+        title={`Attendance Sheet`}
+        subtitle={loaded ? `Class: ${classAndSection} | Date: ${date}` : undefined}
+      />
+
       <Card className="p-5">
         <h3 className="font-semibold mb-4 flex items-center gap-2">
           <CalendarCheck className="w-4 h-4 text-brand-600" /> Mark Attendance
@@ -241,9 +256,14 @@ export default function Attendance() {
               {lock.marked_by_name || 'user'} · {lock.marked_at}
             </span>
           )}
+          
+          {/* 👇 ADD PRINT/SHARE BUTTONS HERE 👇 */}
+          <div className="ml-auto flex items-center gap-2">
+            {loaded && <PrintShare title={`Attendance - ${classAndSection}`} text={`Attendance for ${date}`} />}
+          </div>
         </h3>
 
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 no-print">
           <div>
             <label className="label flex items-center gap-1.5">
               <BookOpen className="w-3.5 h-3.5 text-slate-400" /> Class
@@ -298,7 +318,7 @@ export default function Attendance() {
       ) : (
         <>
           {!locked && (
-            <div className="flex flex-wrap gap-2 items-center">
+            <div className="flex flex-wrap gap-2 items-center no-print">
               <Button size="sm" variant="secondary" onClick={() => markAll('present')}>All Present</Button>
               <Button size="sm" variant="secondary" onClick={() => markAll('absent')}>All Absent</Button>
               <Button size="sm" variant="secondary" onClick={() => markAll('late')}>All Late</Button>
@@ -331,21 +351,20 @@ export default function Attendance() {
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 dark:bg-slate-800">
                   <tr>
-                    <th className="text-left p-3 w-12">#</th>
+                    <th className="text-left p-3 w-12 no-print">#</th>
                     <th className="text-left p-3">Admission #</th>
                     <th className="text-left p-3">Roll</th>
                     <th className="text-left p-3">Student</th>
-                    <th className="text-center p-3">Mark Attendance</th>
+                    <th className="text-center p-3 no-print">Mark Attendance</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                   {students.map((s, i) => (
                     <tr key={s.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
-                      <td className="p-3 text-slate-500">{i + 1}</td>
+                      <td className="p-3 text-slate-500 no-print">{i + 1}</td>
                       <td className="p-3 font-mono text-xs">{s.admission_number}</td>
                       <td className="p-3 text-slate-500">{s.roll_number || '—'}</td>
                       
-                      {/* UPDATED: Student Name and Phone Number */}
                       <td className="p-3">
                         <div className="font-medium">{s.student_name}</div>
                         <div className="text-xs text-slate-500">
@@ -353,7 +372,7 @@ export default function Attendance() {
                         </div>
                       </td>
 
-                      <td className="p-3">
+                      <td className="p-3 no-print">
                         <div className="flex justify-center gap-1.5 flex-wrap">
                           {STATUSES.map((st) => {
                             const Icon = st.icon;
@@ -376,6 +395,11 @@ export default function Attendance() {
                           })}
                         </div>
                       </td>
+                      
+                      {/* For print only: Show the text status instead of buttons */}
+                      <td className="p-3 hidden print:table-cell text-center font-bold uppercase">
+                        {records[s.id]}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -384,7 +408,7 @@ export default function Attendance() {
           </Card>
 
           {!locked && (
-            <div className="flex justify-end">
+            <div className="flex justify-end no-print">
               <Button onClick={saveAll} loading={saving} icon={Save} className="bg-green-600 hover:bg-green-700">
                 Save Attendance ({students.length})
               </Button>

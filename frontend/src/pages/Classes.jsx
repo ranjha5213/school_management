@@ -11,11 +11,13 @@ import Button from '../components/Button';
 import Loader from '../components/Loader';
 import Empty from '../components/Empty';
 import ConfirmDelete from '../components/ConfirmDelete';
+import PrintHeader from '../components/PrintHeader';
+import PrintShare from '../components/PrintShare';
 import { classesApi, studentsApi } from '../api/endpoints';
 import Modal from '../components/Modal';
 import Input from '../components/Input';
 import { Save } from 'lucide-react';
-import { useAuth } from '../context/AuthContext'; // 👈 ADDED AUTH IMPORT
+import { useAuth } from '../context/AuthContext';
 
 // ────────────────────────────────────────────────────────────
 // MAIN ROUTER COMPONENT
@@ -44,7 +46,6 @@ function ClassesList({ nav }) {
   const [classModal, setClassModal] = useState(null);
   const [confirm, setConfirm] = useState(null);
 
-  // 👇 PERMISSION CHECKS
   const { user } = useAuth();
   let userPerms = {};
   try { userPerms = JSON.parse(user.permissions || '{}'); } catch (e) {}
@@ -86,19 +87,24 @@ function ClassesList({ nav }) {
   };
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-4 animate-fade-in print-container">
+      <PrintHeader title="All Classes" subtitle="School-wide class directory" />
+
       <Card className="p-5">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold flex items-center gap-2">
             <School className="w-4 h-4 text-brand-600" /> Classes ({classes.length})
           </h3>
           
-          {/* 👇 HIDE NEW CLASS BUTTON */}
-          {canAddClass && (
-            <Button size="sm" icon={Plus} onClick={() => setClassModal({ mode: 'create', data: {} })}>
-              New Class
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            <PrintShare title="All Classes" text="Here is the list of all classes." />
+            
+            {canAddClass && (
+              <Button size="sm" icon={Plus} onClick={() => setClassModal({ mode: 'create', data: {} })} className="no-print">
+                New Class
+              </Button>
+            )}
+          </div>
         </div>
 
         {loading ? <Loader /> : classes.length === 0 ? (
@@ -109,20 +115,19 @@ function ClassesList({ nav }) {
               <div
                 key={c.id}
                 onClick={() => nav(`/classes/${c.id}`)}
-                className="relative group rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition cursor-pointer"
+                className="relative group rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition cursor-pointer print:border-0 print:border-b print:rounded-none print:pb-2"
               >
                 <div className="w-full text-left p-3 pr-16 pointer-events-none">
                   <div className="font-medium flex items-center gap-1.5">
                     {c.class_name}
                     {c.class_code && <span className="text-xs font-mono text-slate-500">({c.class_code})</span>}
-                    <ChevronRight className="w-3.5 h-3.5" />
                   </div>
                   <div className="text-xs text-slate-500">
                     {c.section_count || 0} section(s) · {c.student_count || 0} student(s)
                   </div>
                 </div>
 
-                <div className="absolute right-2 top-2 flex gap-1">
+                <div className="absolute right-2 top-2 flex gap-1 no-print">
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); nav(`/classes/${c.id}`); }}
@@ -131,7 +136,6 @@ function ClassesList({ nav }) {
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
                   
-                  {/* 👇 HIDE DELETE CLASS BUTTON */}
                   {canDeleteClass && (
                     <button
                       type="button"
@@ -178,7 +182,6 @@ function SectionsScreen({ classId, nav }) {
   const [sectionModal, setSectionModal] = useState(null);
   const [confirm, setConfirm] = useState(null);
 
-  // 👇 PERMISSION CHECKS
   const { user } = useAuth();
   let userPerms = {};
   try { userPerms = JSON.parse(user.permissions || '{}'); } catch (e) {}
@@ -222,10 +225,15 @@ function SectionsScreen({ classId, nav }) {
   };
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-4 animate-fade-in print-container">
+      <PrintHeader 
+        title={`Sections - ${currentClass?.class_name || 'Class'}`} 
+        subtitle={`Total Sections: ${sections.length}`} 
+      />
+
       <Card className="p-5">
         <div className="flex items-center gap-3 mb-4">
-          <button onClick={() => nav('/classes')} className="text-slate-500 hover:text-slate-800">
+          <button onClick={() => nav('/classes')} className="text-slate-500 hover:text-slate-800 no-print">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div className="flex-1">
@@ -236,12 +244,14 @@ function SectionsScreen({ classId, nav }) {
             <p className="text-xs text-slate-500">{sections.length} section(s)</p>
           </div>
           
-          {/* 👇 HIDE NEW SECTION BUTTON */}
-          {canAddSection && (
-            <Button size="sm" icon={Plus} onClick={() => setSectionModal({ mode: 'create', data: {} })}>
-              New Section
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            <PrintShare title="Class Sections" />
+            {canAddSection && (
+              <Button size="sm" icon={Plus} onClick={() => setSectionModal({ mode: 'create', data: {} })} className="no-print">
+                New Section
+              </Button>
+            )}
+          </div>
         </div>
 
         {loading ? <Loader /> : sections.length === 0 ? (
@@ -249,23 +259,21 @@ function SectionsScreen({ classId, nav }) {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {sections.map((s) => (
-              <div key={s.id} className="relative group rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 transition">
+              <div key={s.id} className="relative group rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 transition print:border-0 print:border-b print:rounded-none print:pb-2">
                 <button
                   onClick={() => nav(`/classes/${classId}/sections/${s.id}`)}
                   className="w-full text-left p-4 pr-16"
                 >
                   <div className="font-medium flex items-center gap-1.5">
-                    <Building2 className="w-3.5 h-3.5 text-purple-500" />
+                    <Building2 className="w-3.5 h-3.5 text-purple-500 print:hidden" />
                     Section {s.section_name}
-                    <ChevronRight className="w-3.5 h-3.5" />
                   </div>
                   <div className="text-xs text-slate-500 mt-1">
                     {s.student_count || 0} student(s) · Room {s.room_number || '—'}
                   </div>
                 </button>
 
-                <div className="absolute right-2 top-2 flex gap-1 opacity-0 group-hover:opacity-100 transition">
-                  {/* 👇 HIDE EDIT SECTION BUTTON */}
+                <div className="absolute right-2 top-2 flex gap-1 opacity-0 group-hover:opacity-100 transition no-print">
                   {canEditSection && (
                     <button
                       onClick={() => setSectionModal({ mode: 'edit', data: s })}
@@ -275,7 +283,6 @@ function SectionsScreen({ classId, nav }) {
                     </button>
                   )}
                   
-                  {/* 👇 HIDE DELETE SECTION BUTTON */}
                   {canDeleteSection && (
                     <button
                       onClick={() => setConfirm({ id: s.id, name: `Section ${s.section_name}` })}
@@ -312,11 +319,12 @@ function SectionsScreen({ classId, nav }) {
 }
 
 // ────────────────────────────────────────────────────────────
-// SCREEN 3 — Students in a section (REVAMPED)
+// SCREEN 3 — Students in a section
 // ────────────────────────────────────────────────────────────
 function StudentsScreen({ classId, sectionId, nav }) {
   const [students, setStudents] = useState([]);
   const [section, setSection] = useState(null);
+  const [currentClass, setCurrentClass] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState('roll'); 
   
@@ -324,12 +332,10 @@ function StudentsScreen({ classId, sectionId, nav }) {
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
-  const [actionMenu, setActionMenu] = useState(null); // { id, name, x, y }
+  const [actionMenu, setActionMenu] = useState(null);
 
-  // Long press timer ref
   const pressTimer = useRef(null);
 
-  // 👇 PERMISSION CHECKS
   const { user } = useAuth();
   let userPerms = {};
   try { userPerms = JSON.parse(user.permissions || '{}'); } catch (e) {}
@@ -341,10 +347,12 @@ function StudentsScreen({ classId, sectionId, nav }) {
   const load = async () => {
     setLoading(true);
     try {
-      const [secs, studs] = await Promise.all([
+      const [cls, secs, studs] = await Promise.all([
+        classesApi.get(classId),
         classesApi.sections(classId),
         studentsApi.list({ section_id: sectionId, sort: sortBy }),
       ]);
+      setCurrentClass(cls);
       const sec = secs.find((s) => String(s.id) === String(sectionId));
       setSection(sec);
       setStudents(studs || []);
@@ -356,17 +364,15 @@ function StudentsScreen({ classId, sectionId, nav }) {
 
   // ── Long press logic ──
   const handlePressStart = (e, student) => {
-    // Only allow long press if they have edit or delete permissions
     if (!canEditStudent && !canDeleteStudent) return;
 
-    // Get position for the popup menu
     const rect = e.currentTarget.getBoundingClientRect();
     const x = rect.left + rect.width / 2;
     const y = rect.top + rect.height / 2;
 
     pressTimer.current = setTimeout(() => {
       setActionMenu({ id: student.id, name: student.student_name, x, y });
-    }, 1000); // 1 second hold
+    }, 1000);
   };
 
   const handlePressEnd = () => {
@@ -375,7 +381,6 @@ function StudentsScreen({ classId, sectionId, nav }) {
     }
   };
 
-  // If the user clicks away, close the menu
   useEffect(() => {
     const closeMenu = () => setActionMenu(null);
     window.addEventListener('click', closeMenu);
@@ -417,26 +422,33 @@ function StudentsScreen({ classId, sectionId, nav }) {
   };
 
   return (
-    <div className="space-y-4 animate-fade-in relative min-h-screen">
+    <div className="space-y-4 animate-fade-in relative min-h-screen print-container">
+      <PrintHeader 
+        title={`Class Roster - ${currentClass?.class_name || ''}`} 
+        subtitle={`Section ${section?.section_name || ''} (${students.length} Students)`} 
+      />
+
       <Card className="p-5">
         <div className="flex items-center gap-3 mb-4 flex-wrap">
-          <button onClick={() => nav(`/classes/${classId}`)} className="text-slate-500 hover:text-slate-800">
+          <button onClick={() => nav(`/classes/${classId}`)} className="text-slate-500 hover:text-slate-800 no-print">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div className="flex-1">
             <h2 className="text-lg font-semibold flex items-center gap-2">
-              <Users className="w-4 h-4 text-brand-600" />
+              <Users className="w-4 h-4 text-brand-600 print:hidden" />
               Section {section?.section_name || sectionId}
             </h2>
             <p className="text-xs text-slate-500">{students.length} student(s)</p>
           </div>
 
           <div className="flex items-center gap-2">
+            <PrintShare title="Class Roster" text="Here is the class roster." />
+            
             <Button 
               size="sm" 
               variant="secondary"
               onClick={() => setSortBy(sortBy === 'roll' ? 'name' : 'roll')}
-              className="flex items-center gap-2 text-sm"
+              className="flex items-center gap-2 text-sm no-print"
             >
               {sortBy === 'roll' ? (
                 <><ListOrdered className="w-4 h-4" /> Sorted by Roll</>
@@ -445,9 +457,8 @@ function StudentsScreen({ classId, sectionId, nav }) {
               )}
             </Button>
 
-            {/* 👇 HIDE ADD STUDENT BUTTON */}
             {canAddStudent && (
-              <Button size="sm" icon={Plus} onClick={() => setIsAddOpen(true)}>
+              <Button size="sm" icon={Plus} onClick={() => setIsAddOpen(true)} className="no-print">
                 Add
               </Button>
             )}
@@ -467,9 +478,10 @@ function StudentsScreen({ classId, sectionId, nav }) {
                 onMouseLeave={handlePressEnd}
                 onTouchStart={(e) => handlePressStart(e, s)}
                 onTouchEnd={handlePressEnd}
-                className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 text-left select-none"
+                // 👇 Added print:block to force button to show on paper
+                className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 text-left select-none print:block print:w-full print:border-0 print:bg-transparent"
               >
-                <div className="w-10 h-10 rounded-full bg-brand-100 flex items-center justify-center font-bold text-brand-700">
+                <div className="w-10 h-10 rounded-full bg-brand-100 flex items-center justify-center font-bold text-brand-700 print:hidden">
                   {s.student_name?.[0]?.toUpperCase() || '?'}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -478,25 +490,24 @@ function StudentsScreen({ classId, sectionId, nav }) {
                     Roll {s.roll_number || '—'} · {s.admission_number || '—'}
                   </div>
                 </div>
-                <ChevronRight className="w-4 h-4 text-slate-400" />
+                <ChevronRight className="w-4 h-4 text-slate-400 print:hidden" />
               </button>
             ))}
           </div>
         )}
       </Card>
 
-      {/* 👇 FLOATING ACTION MENU (Long Press) */}
+      {/* FLOATING ACTION MENU */}
       {actionMenu && (
         <div 
-          className="fixed z-50 bg-white dark:bg-slate-800 shadow-xl rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden animate-fade-in"
+          className="fixed z-50 bg-white dark:bg-slate-800 shadow-xl rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden animate-fade-in no-print"
           style={{ top: actionMenu.y, left: actionMenu.x, transform: 'translate(-50%, -50%)' }}
-          onClick={(e) => e.stopPropagation()} // Prevent immediate close
+          onClick={(e) => e.stopPropagation()}
         >
           <div className="px-3 py-2 text-xs font-semibold text-slate-500 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 text-center max-w-[150px] truncate">
             {actionMenu.name}
           </div>
           
-          {/* 👇 HIDE EDIT BUTTON IN MENU */}
           {canEditStudent && (
             <button 
               onClick={() => { setEditingStudent(students.find(s => s.id === actionMenu.id)); setActionMenu(null); }}
@@ -506,7 +517,6 @@ function StudentsScreen({ classId, sectionId, nav }) {
             </button>
           )}
           
-          {/* 👇 HIDE DELETE BUTTON IN MENU */}
           {canDeleteStudent && (
             <button 
               onClick={() => { setDeletingId(actionMenu.id); setActionMenu(null); }}
@@ -518,7 +528,7 @@ function StudentsScreen({ classId, sectionId, nav }) {
         </div>
       )}
 
-      {/* ── ADD STUDENT MODAL ── */}
+      {/* ADD STUDENT MODAL */}
       {isAddOpen && (
         <AddStudentModal
           sectionId={sectionId}
@@ -528,9 +538,9 @@ function StudentsScreen({ classId, sectionId, nav }) {
         />
       )}
 
-      {/* ── EDIT STUDENT MODAL ── */}
+      {/* EDIT STUDENT MODAL */}
       {editingStudent && (
-        <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto" onClick={() => setEditingStudent(null)}>
+        <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto no-print" onClick={() => setEditingStudent(null)}>
           <form
             onSubmit={handleUpdateSubmit}
             onClick={(e) => e.stopPropagation()}
@@ -598,7 +608,7 @@ function StudentsScreen({ classId, sectionId, nav }) {
         </div>
       )}
 
-      {/* ── DELETE CONFIRMATION MODAL ── */}
+      {/* DELETE CONFIRMATION MODAL */}
       {deletingId && (
         <ConfirmDelete
           open={!!deletingId}

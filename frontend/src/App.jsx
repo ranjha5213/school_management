@@ -1,10 +1,16 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { useState } from 'react'; // 👈 Added useState
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SettingsProvider } from './context/SettingsContext';
 import { SocketProvider } from './context/SocketContext';
 import { ThemeProvider } from './context/ThemeContext';
-import Layout from './components/Layout';
+
+// Components
+import Sidebar from './components/Sidebar';
+import Topbar from './components/Topbar';
+
+// Pages
 import Login from './pages/Login';
 import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
@@ -31,15 +37,15 @@ import ReportCard from './pages/ReportCard';
 import Library from './pages/Library';
 import Notices from './pages/Notices';
 import Profile from './pages/Profile';
-import Settings from './pages/Settings'; // 👈 ADDED SETTINGS IMPORT
+import Settings from './pages/Settings';
 
-// ─── Attendance drill-down pages ───
+// Attendance drill-down
 import AttendanceOverview from './pages/AttendanceOverview';
 import SectionDetail from './pages/SectionDetail';
 import StudentAttendanceHistory from './pages/StudentAttendanceHistory';
 import MyAttendance from './pages/MyAttendance';
 
-// ─── NEW: Timetable drill-down pages ───
+// Timetable drill-down
 import TimetableView from './pages/TimetableView';
 import TimetableEdit from './pages/TimetableEdit';
 import TimetableAdd from './pages/TimetableAdd';
@@ -51,6 +57,34 @@ function Protected({ children, adminOnly = false, roles = null }) {
   if (adminOnly && user.role !== 'admin') return <Navigate to="/dashboard" replace />;
   if (roles && !roles.includes(user.role)) return <Navigate to="/dashboard" replace />;
   return children;
+}
+
+// 👇 Replaces the missing Layout.jsx AND handles mobile menu state
+function AppLayout() {
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  return (
+    <div className="flex h-screen bg-slate-50 dark:bg-slate-950 overflow-hidden print:block print:h-auto print:overflow-visible">
+      
+      {/* Sidebar (Hidden on Print) */}
+      <div className="print:hidden flex shrink-0">
+        <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
+      </div>
+
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden print:block print:overflow-visible">
+        
+        {/* Topbar (Hidden on Print) - Passes the click handler */}
+        <div className="print:hidden">
+          <Topbar onMenuClick={() => setMobileOpen(true)} />
+        </div>
+
+        {/* Main Content */}
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 print:p-0 print:overflow-visible print:h-auto print:block">
+          <Outlet />
+        </main>
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
@@ -76,15 +110,15 @@ export default function App() {
               />
 
               <Routes>
-                {/* ─── Auth pages (no layout) ─── */}
+                {/* Auth pages */}
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
                 <Route path="/forgot-password" element={<ForgotPassword />} />
                 <Route path="/verify-otp" element={<VerifyOtp />} />
                 <Route path="/reset-password" element={<ResetPassword />} />
 
-                {/* ─── App shell — everything inside gets sidebar + topbar ─── */}
-                <Route path="/" element={<Protected><Layout /></Protected>}>
+                {/* App shell */}
+                <Route path="/" element={<Protected><AppLayout /></Protected>}>
                   <Route index element={<Navigate to="/dashboard" replace />} />
 
                   <Route path="dashboard" element={<Dashboard />} />
@@ -96,10 +130,8 @@ export default function App() {
                   <Route path="teachers" element={<Teachers />} />
                   <Route path="teachers/:teacherId" element={<TeacherDetail />} />
 
-                  {/* Existing mark-attendance page */}
                   <Route path="attendance" element={<Attendance />} />
 
-                  {/* ─── Attendance drill-down (inside layout) ─── */}
                   <Route
                     path="attendance/view"
                     element={<Protected roles={['admin', 'teacher']}><AttendanceOverview /></Protected>}
@@ -122,7 +154,6 @@ export default function App() {
                   <Route path="homework" element={<Homework />} />
                   <Route path="homework/:homeworkId" element={<Homework />} />
 
-                  {/* ─── Timetable (existing + new drill-down) ─── */}
                   <Route path="timetable" element={<Timetable />} />
                   <Route
                     path="timetable/school"
@@ -130,7 +161,6 @@ export default function App() {
                   />
                   <Route path="timetable/:sectionId" element={<Timetable />} />
 
-                  {/* NEW: Timetable drill-down routes */}
                   <Route
                     path="timetable/view"
                     element={<Protected roles={['admin', 'teacher']}><TimetableView /></Protected>}
@@ -165,13 +195,11 @@ export default function App() {
                   <Route path="notices/:noticeId" element={<Notices />} />
                   <Route path="profile" element={<Profile />} />
                   
-                  {/* 👇 ADDED SETTINGS ROUTE */}
                   <Route path="settings" element={<Protected adminOnly><Settings /></Protected>} />
                   
                   <Route path="pending-users" element={<Protected adminOnly><PendingUsers /></Protected>} />
                 </Route>
 
-                {/* Fallback */}
                 <Route path="*" element={<Navigate to="/dashboard" replace />} />
               </Routes>
             </BrowserRouter>

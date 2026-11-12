@@ -11,6 +11,8 @@ import Empty from '../components/Empty';
 import ConfirmDelete from '../components/ConfirmDelete';
 import BookModal from '../components/BookModal';
 import IssueModal from '../components/IssueModal';
+import PrintHeader from '../components/PrintHeader'; // 👈 ADDED
+import PrintShare from '../components/PrintShare';   // 👈 ADDED
 import { libraryApi } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 
@@ -74,20 +76,32 @@ export default function Library() {
   };
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-4 animate-fade-in print-container">
+      {/* 👇 ADD PRINT HEADER HERE 👇 */}
+      <PrintHeader 
+        title={`Library - ${tab === 'books' ? 'Books Catalog' : 'Issued Books'}`} 
+        subtitle={q ? `Search results for "${q}"` : undefined} 
+      />
+
       <Card className="p-5">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <h3 className="font-semibold flex items-center gap-2">
             <LibraryIcon className="w-4 h-4 text-brand-600" /> Library
           </h3>
-          {canWrite && tab === 'books' && (
-            <Button size="sm" icon={Plus} onClick={() => setBookModal({ mode: 'create' })}>
-              Add Book
-            </Button>
-          )}
+          
+          <div className="flex items-center gap-2">
+            {/* 👇 ADD PRINT/SHARE BUTTONS HERE 👇 */}
+            <PrintShare title={`Library ${tab === 'books' ? 'Books' : 'Issues'}`} text="Here is the library record." />
+
+            {canWrite && tab === 'books' && (
+              <Button size="sm" icon={Plus} onClick={() => setBookModal({ mode: 'create' })} className="no-print">
+                Add Book
+              </Button>
+            )}
+          </div>
         </div>
 
-        <div className="flex gap-1 border-b border-slate-200 dark:border-slate-800 dark:border-slate-800 mb-3">
+        <div className="flex gap-1 border-b border-slate-200 dark:border-slate-800 mb-3 no-print">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => setTab(id)}
               className={`px-3 py-2 text-sm font-medium flex items-center gap-1.5 border-b-2 -mb-px transition ${
@@ -100,14 +114,16 @@ export default function Library() {
 
         {tab === 'books' && (
           <>
-            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search title, author, ISBN…" />
+            <div className="no-print">
+              <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search title, author, ISBN…" />
+            </div>
             <div className="mt-3">
               {loading ? <Loader /> : books.length === 0 ? (
                 <Empty title="No books" hint={canWrite ? 'Add one to start' : null} />
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                   {books.map((b) => (
-                    <div key={b.id} className="relative group rounded-xl border border-slate-200 dark:border-slate-800 dark:border-slate-700 p-3">
+                    <div key={b.id} className="relative group rounded-xl border border-slate-200 dark:border-slate-700 p-3">
                       <div className="font-medium text-sm pr-16">{b.title}</div>
                       <div className="text-xs text-slate-500 mt-0.5">{b.author || '—'}</div>
                       <div className="text-xs mt-1 flex items-center gap-2">
@@ -118,19 +134,19 @@ export default function Library() {
                         </span>
                       </div>
                       {canWrite && (
-                        <div className="absolute right-2 top-2 flex gap-1 opacity-0 group-hover:opacity-100 transition">
+                        <div className="absolute right-2 top-2 flex gap-1 opacity-0 group-hover:opacity-100 transition no-print">
                           <button onClick={() => setIssueTarget(b)}
-                            className="p-1 rounded bg-white dark:bg-slate-900 dark:bg-slate-800 text-brand-600 text-xs"
+                            className="p-1 rounded bg-white dark:bg-slate-800 text-brand-600 text-xs"
                             disabled={b.available_copies < 1}>
                             Issue
                           </button>
                           <button onClick={() => setBookModal({ mode: 'edit', data: b })}
-                            className="p-1 rounded bg-white dark:bg-slate-900 dark:bg-slate-800 text-slate-600">
+                            className="p-1 rounded bg-white dark:bg-slate-800 text-slate-600">
                             <Pencil className="w-3 h-3" />
                           </button>
                           {isAdmin && (
                             <button onClick={() => setConfirm({ type: 'book', id: b.id, name: b.title })}
-                              className="p-1 rounded bg-white dark:bg-slate-900 dark:bg-slate-800 text-red-600">
+                              className="p-1 rounded bg-white dark:bg-slate-800 text-red-600">
                               <Trash2 className="w-3 h-3" />
                             </button>
                           )}
@@ -159,10 +175,10 @@ export default function Library() {
                       <th className="text-left p-3">Due</th>
                       <th className="text-left p-3">Returned</th>
                       <th className="text-center p-3">Status</th>
-                      <th className="text-right p-3">Actions</th>
+                      <th className="text-right p-3 no-print">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700 dark:divide-slate-700">
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                     {issues.map((i) => {
                       const overdue = i.status === 'issued' && i.due_date < new Date().toISOString().slice(0, 10);
                       return (
@@ -180,7 +196,7 @@ export default function Library() {
                               {i.status === 'issued' && overdue ? 'overdue' : i.status}
                             </span>
                           </td>
-                          <td className="p-3 text-right">
+                          <td className="p-3 text-right no-print">
                             {canWrite && i.status === 'issued' && (
                               <button onClick={() => returnBook(i)}
                                 className="text-xs text-brand-600 font-medium">

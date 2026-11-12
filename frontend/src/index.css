@@ -98,21 +98,104 @@
 .animate-modal-in { animation: modal-in .15s ease-out; }
 
 /* ═══════════════════════════════════════════════════════════
-   Print — force light theme regardless of current mode
+   Print — Bulletproof Document Formatting
    ═══════════════════════════════════════════════════════════ */
 @media print {
+  @page {
+    size: auto;
+    margin: 5mm; 
+  }
+
+  /* 1. Force light theme */
   html, html.dark {
     color-scheme: light !important;
-  }
-  html.dark body {
     background: #ffffff !important;
-    color: #000000 !important;
   }
-  .print\:hidden { display: none !important; }
-  .print\:shadow-none { box-shadow: none !important; }
-  .print\:border-0 { border: 0 !important; }
+
+  /* 2. HIDE EVERYTHING by default (including Sidebar and Topbar) */
+  body * {
+    visibility: hidden;
+  }
+
+  /* 3. SHOW ONLY the print-container and its children */
+  .print-container, .print-container * {
+    visibility: visible;
+  }
+
+  /* 4. Position the print-container at the absolute top left of the paper */
+  .print-container {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+  }
+
+  /* 5. Hide UI inputs/buttons explicitly */
+  /* 👇 FIX: Ignore buttons that have the print:block class */
+  button:not(.print\:block), input, select, textarea, .no-print {
+    display: none !important;
+  }
+
+  /* 6. Strip shadows and background colors from cards inside the print container */
+  .print-container div, .print-container .card {
+    box-shadow: none !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+  }
+
+  /* 👇 FIX: Stack the student grid vertically and add borders */
+  .print-container .grid {
+    display: block !important;
+  }
+
+  .print-container .grid > * {
+    display: block !important;
+    width: 100% !important;
+    margin-bottom: 8px !important;
+    padding-bottom: 8px !important;
+    page-break-inside: avoid !important;
+    border-bottom: 1px solid #cbd5e1 !important;
+  }
+
+  /* 7. Format Tables */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+  tr {
+    page-break-inside: avoid !important;
+  }
+  th, td {
+    border: 1px solid #94a3b8 !important;
+    padding: 6px 8px !important;
+    background: transparent !important;
+    color: #000000 !important;
+    font-size: 10pt !important;
+  }
+  th {
+    background-color: #f1f5f9 !important; 
+    font-weight: bold !important;
+  }
+
+  /* 8. Print Header styling */
+  .print-header {
+    border-bottom: 2px solid #000000 !important;
+    display: block !important;
+    margin-bottom: 15px !important;
+    padding-bottom: 10px !important;
+  }
+
+  /* Prevent page breaks inside headings */
+  h1, h2, h3, h4, h5, h6 {
+    page-break-after: avoid !important;
+  }
+  
   * {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 }

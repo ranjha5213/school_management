@@ -22,11 +22,11 @@ export default function Teachers() {
     name: '', email: '', phone: '', employee_code: '', qualification: '', department_id: ''
   });
 
-  // 👇 Permissions state
+  // 👇 Updated Permissions state with view_* keys
   const [permissions, setPermissions] = useState({
-    add_student: false, edit_student: false, delete_student: false,
-    add_class: false, edit_class: false, delete_class: false,
-    edit_attendance: false
+    view_student: true, add_student: false, edit_student: false, delete_student: false,
+    view_class: true, add_class: false, edit_class: false, delete_class: false,
+    view_attendance: true, edit_attendance: false
   });
 
   const fetchTeachers = () => {
@@ -57,12 +57,17 @@ export default function Teachers() {
       try {
         const parsed = editingTeacher.permissions ? JSON.parse(editingTeacher.permissions) : {};
         setPermissions({
+          view_student: parsed.view_student ?? true, // Default to true if not set
           add_student: parsed.add_student || false,
           edit_student: parsed.edit_student || false,
           delete_student: parsed.delete_student || false,
+          
+          view_class: parsed.view_class ?? true,
           add_class: parsed.add_class || false,
           edit_class: parsed.edit_class || false,
           delete_class: parsed.delete_class || false,
+          
+          view_attendance: parsed.view_attendance ?? true,
           edit_attendance: parsed.edit_attendance || false,
         });
       } catch (e) {
@@ -72,9 +77,9 @@ export default function Teachers() {
       // Reset form when closing
       setFormData({ name: '', email: '', phone: '', employee_code: '', qualification: '', department_id: '' });
       setPermissions({
-        add_student: false, edit_student: false, delete_student: false,
-        add_class: false, edit_class: false, delete_class: false,
-        edit_attendance: false
+        view_student: true, add_student: false, edit_student: false, delete_student: false,
+        view_class: true, add_class: false, edit_class: false, delete_class: false,
+        view_attendance: true, edit_attendance: false
       });
     }
   }, [editingTeacher]);
@@ -266,7 +271,7 @@ export default function Teachers() {
               </div>
             </div>
 
-            {/* 👇 NEW PERMISSIONS SECTION 👇 */}
+            {/* 👇 PERMISSIONS SECTION 👇 */}
             <div className="border-t border-slate-200 dark:border-slate-700 pt-4 mt-4">
               <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
                 <Shield className="w-4 h-4 text-brand-600" /> System Privileges
@@ -276,20 +281,27 @@ export default function Teachers() {
                 {/* Students */}
                 <div className="space-y-2">
                   <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Students</p>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-brand-600 transition font-medium">
+                    <input type="checkbox" checked={permissions.view_student || false} 
+                      onChange={() => handlePermissionChange('view_student')} 
+                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4" />
+                    View Students
+                  </label>
+                  <hr className="border-slate-200 dark:border-slate-700 my-1" />
                   <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-brand-600 transition">
-                    <input type="checkbox" checked={permissions.add_student} 
+                    <input type="checkbox" checked={permissions.add_student || false} 
                       onChange={() => handlePermissionChange('add_student')} 
                       className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4" />
                     Add Student
                   </label>
                   <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-brand-600 transition">
-                    <input type="checkbox" checked={permissions.edit_student} 
+                    <input type="checkbox" checked={permissions.edit_student || false} 
                       onChange={() => handlePermissionChange('edit_student')} 
                       className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4" />
                     Edit Student
                   </label>
                   <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-brand-600 transition">
-                    <input type="checkbox" checked={permissions.delete_student} 
+                    <input type="checkbox" checked={permissions.delete_student || false} 
                       onChange={() => handlePermissionChange('delete_student')} 
                       className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4" />
                     Delete Student
@@ -299,20 +311,27 @@ export default function Teachers() {
                 {/* Classes */}
                 <div className="space-y-2">
                   <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Classes / Sections</p>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-brand-600 transition font-medium">
+                    <input type="checkbox" checked={permissions.view_class || false} 
+                      onChange={() => handlePermissionChange('view_class')} 
+                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4" />
+                    View Classes
+                  </label>
+                  <hr className="border-slate-200 dark:border-slate-700 my-1" />
                   <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-brand-600 transition">
-                    <input type="checkbox" checked={permissions.add_class} 
+                    <input type="checkbox" checked={permissions.add_class || false} 
                       onChange={() => handlePermissionChange('add_class')} 
                       className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4" />
                     Add Class/Section
                   </label>
                   <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-brand-600 transition">
-                    <input type="checkbox" checked={permissions.edit_class} 
+                    <input type="checkbox" checked={permissions.edit_class || false} 
                       onChange={() => handlePermissionChange('edit_class')} 
                       className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4" />
                     Edit Class/Section
                   </label>
                   <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-brand-600 transition">
-                    <input type="checkbox" checked={permissions.delete_class} 
+                    <input type="checkbox" checked={permissions.delete_class || false} 
                       onChange={() => handlePermissionChange('delete_class')} 
                       className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4" />
                     Delete Class/Section
@@ -322,8 +341,15 @@ export default function Teachers() {
                 {/* Attendance */}
                 <div className="space-y-2">
                   <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Attendance</p>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-brand-600 transition font-medium">
+                    <input type="checkbox" checked={permissions.view_attendance || false} 
+                      onChange={() => handlePermissionChange('view_attendance')} 
+                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4" />
+                    View Attendance
+                  </label>
+                  <hr className="border-slate-200 dark:border-slate-700 my-1" />
                   <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-brand-600 transition">
-                    <input type="checkbox" checked={permissions.edit_attendance} 
+                    <input type="checkbox" checked={permissions.edit_attendance || false} 
                       onChange={() => handlePermissionChange('edit_attendance')} 
                       className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4" />
                     Mark/Edit Attendance

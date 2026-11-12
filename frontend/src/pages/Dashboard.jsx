@@ -7,9 +7,7 @@ import {
 import Card from '../components/Card';
 import Loader from '../components/Loader';
 import { useAuth } from '../context/AuthContext';
-import {
-  classesApi, reportsApi, feesApi, noticesApi,
-} from '../api/endpoints';
+import { reportsApi, feesApi, noticesApi } from '../api/endpoints';
 
 const STAFF = ['admin', 'teacher', 'accountant'];
 
@@ -18,7 +16,6 @@ export default function Dashboard() {
   const { user } = useAuth();
   const isStaff = STAFF.includes(user?.role);
 
-  const [classes, setClasses] = useState([]);
   const [stats, setStats] = useState(null);
   const [feeSummary, setFeeSummary] = useState(null);
   const [todayAttendance, setTodayAttendance] = useState(null);
@@ -31,12 +28,10 @@ export default function Dashboard() {
       return;
     }
     Promise.all([
-      classesApi.list().catch(() => []),
       reportsApi.dashboard().catch(() => null),
       feesApi.summary().catch(() => null),
       noticesApi.inbox().catch(() => null),
-    ]).then(([c, s, f, n]) => {
-      setClasses(Array.isArray(c) ? c : []);
+    ]).then(([s, f, n]) => {
       setStats(s);
       setFeeSummary(f);
       setInbox(n);
@@ -151,36 +146,6 @@ export default function Dashboard() {
           <button onClick={() => nav('/fees')} className="text-xs text-brand-600 hover:underline mt-3">
             Manage fees →
           </button>
-        </Card>
-      )}
-
-      {/* Staff-only: classes grid */}
-      {isStaff && (
-        <Card className="p-5">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold">Classes</h3>
-            <button onClick={() => nav('/classes')} className="text-xs text-brand-600 hover:underline">
-              View all →
-            </button>
-          </div>
-          {classes.length === 0 ? (
-            <div className="text-sm text-slate-500">No classes yet</div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-              {classes.map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => nav(`/classes/${c.id}`)}
-                  className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-left transition"
-                >
-                  <div className="font-medium">{c.class_name}</div>
-                  <div className="text-xs text-slate-500">
-                    {c.section_count} sections · {c.student_count} students
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
         </Card>
       )}
 

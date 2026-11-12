@@ -7,6 +7,8 @@ import Loader from '../components/Loader';
 import Empty from '../components/Empty';
 import ConfirmDelete from '../components/ConfirmDelete';
 import AddStudentModal from '../components/AddStudentModal';
+import PrintHeader from '../components/PrintHeader'; // 👈 ADDED
+import PrintShare from '../components/PrintShare';   // 👈 ADDED
 import { studentsApi, classesApi } from '../api/endpoints';
 
 export default function Students() {
@@ -104,18 +106,27 @@ export default function Students() {
 
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-4 animate-fade-in print-container">
+      {/* 👇 ADD PRINT HEADER HERE 👇 */}
+      <PrintHeader 
+        title="Student Directory" 
+        subtitle="All Registered Students" 
+      />
+
       <Card className="p-5">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-3">
           <h3 className="font-semibold flex items-center gap-2">
             <Users className="w-4 h-4 text-brand-600" /> Students ({filtered.length})
           </h3>
           
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+            {/* 👇 ADD PRINT/SHARE BUTTONS HERE 👇 */}
+            <PrintShare title="Student Directory" text="Here is the full student list." />
+
             <select
               value={selectedSectionId}
               onChange={(e) => setSelectedSectionId(e.target.value)}
-              className="input text-sm py-1.5"
+              className="input text-sm py-1.5 w-auto no-print"
             >
               <option value="">Select Section for New Student</option>
               {sections.map((sec) => (
@@ -133,14 +144,14 @@ export default function Students() {
                 }
                 setIsAddOpen(true);
               }} 
-              className="btn btn-primary flex items-center gap-1.5 text-sm whitespace-nowrap"
+              className="btn btn-primary flex items-center gap-1.5 text-sm whitespace-nowrap no-print"
             >
               <UserPlus className="w-4 h-4" /> Add Student
             </button>
           </div>
         </div>
 
-        <div className="relative mb-3">
+        <div className="relative mb-3 no-print">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             value={q}
@@ -165,7 +176,7 @@ export default function Students() {
                   <th className="text-left p-3">Admission #</th>
                   <th className="text-left p-3">Roll</th>
                   <th className="text-left p-3">Class</th>
-                  <th className="text-right p-3">Actions</th>
+                  <th className="text-right p-3 no-print">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
@@ -181,7 +192,7 @@ export default function Students() {
                     <td className="p-3 font-mono text-xs">{r.admission_number}</td>
                     <td className="p-3">{r.roll_number || '—'}</td>
                     <td className="p-3 text-slate-500">{r.class_name} · {r.section_name}</td>
-                    <td className="p-3 text-right space-x-1" onClick={(e) => e.stopPropagation()}>
+                    <td className="p-3 text-right space-x-1 no-print" onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={() => setEditingStudent(r)}
                         className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-800 rounded"
@@ -220,7 +231,7 @@ export default function Students() {
 
       {/* Edit Student Modal */}
       {editingStudent && (
-        <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto no-print">
           <form
             onSubmit={handleUpdateSubmit}
             className="bg-white dark:bg-slate-900 rounded-lg p-6 w-full max-w-2xl space-y-4 shadow-xl my-8"

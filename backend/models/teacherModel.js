@@ -50,7 +50,7 @@ const TeacherModel = {
   update: (id, patch) => {
     const ALLOWED = [
       'employee_code', 'department_id', 'qualification',
-      'join_date', 'salary_cents',
+      'join_date', 'salary_cents','permissions',
     ];
     const keys = Object.keys(patch).filter((k) => ALLOWED.includes(k));
     if (!keys.length) return Promise.resolve({ changes: 0 });

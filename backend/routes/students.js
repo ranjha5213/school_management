@@ -7,7 +7,7 @@ const { requireStudentAccess } = require('../utils/policies');
 const router = express.Router();
 router.use(authenticate);
 
-router.get('/', authorize('admin', 'teacher'), c.listStudents);
+router.get('/', authorize('admin', 'teacher'),checkPermission('view_student'), c.listStudents);
 
 // 👇 Updated: Admins bypass, Teachers need 'add_student' permission
 router.post('/', 

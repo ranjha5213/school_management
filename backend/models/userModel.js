@@ -8,7 +8,12 @@ const UserModel = {
       [name, email, password_hash, role, phone, avatar_url, status]
     ),
 
-  findByEmail: (email) => get(`SELECT * FROM users WHERE email = ?`, [email]),
+  findByEmail: (email) => get(`
+  SELECT u.*, t.permissions 
+  FROM users u 
+  LEFT JOIN teachers t ON u.id = t.user_id 
+  WHERE u.email = ?
+`, [email]),
 
   findById: (id) =>
     get(

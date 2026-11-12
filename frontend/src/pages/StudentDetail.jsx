@@ -9,6 +9,8 @@ import Card from '../components/Card';
 import Avatar from '../components/Avatar';
 import Loader from '../components/Loader';
 import Empty from '../components/Empty';
+import PrintHeader from '../components/PrintHeader'; // 👈 ADDED
+import PrintShare from '../components/PrintShare';   // 👈 ADDED
 import { studentsApi, attendanceApi } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 
@@ -36,21 +38,36 @@ export default function StudentDetail() {
 
   const { profile, attendanceSummary, fees, homework, exams } = data;
 
+  // Get the active tab label for the print header
+  const activeTabLabel = TABS.find(t => t.id === tab)?.label || 'Profile';
+
   return (
-    <div className="space-y-4 animate-fade-in">
-      <button onClick={() => nav(-1)} className="text-sm text-slate-500 hover:text-slate-800 dark:text-slate-100 flex items-center gap-1">
-        <ArrowLeft className="w-4 h-4" /> Back
-      </button>
+    <div className="space-y-4 animate-fade-in print-container">
+      {/* 👇 ADD PRINT HEADER HERE 👇 */}
+      <PrintHeader 
+        title={`${activeTabLabel} Report`} 
+        subtitle={`Student: ${profile.name} | Class: ${profile.class_name || '—'} - ${profile.section_name || '—'}`} 
+      />
+
+      <div className="flex items-center justify-between no-print">
+        <button onClick={() => nav(-1)} className="text-sm text-slate-500 hover:text-slate-800 dark:text-slate-100 flex items-center gap-1">
+          <ArrowLeft className="w-4 h-4" /> Back
+        </button>
+
+        {/* 👇 ADD PRINT/SHARE BUTTONS HERE 👇 */}
+        <PrintShare title={`${profile.name} - ${activeTabLabel}`} text={`Student details for ${profile.name}`} />
+      </div>
 
       <Card className="p-5">
         <div className="flex items-start gap-4">
+        <div className="no-print">
           <Avatar src={profile.avatar_url} name={profile.name} size={56} />
+         </div>
           <div className="flex-1">
             <h2 className="text-lg font-semibold">{profile.name}</h2>
             <div className="text-sm text-slate-500 mt-1 flex flex-wrap gap-3">
               <span className="flex items-center gap-1"><Mail className="w-3.5 h-3.5" />{profile.email}</span>
               
-              {/* 👇 ADDED PHONE NUMBER HERE 👇 */}
               {profile.phone && (
                 <span className="flex items-center gap-1"><Phone className="w-3.5 h-3.5" />{profile.phone}</span>
               )}
@@ -61,7 +78,7 @@ export default function StudentDetail() {
           </div>
         </div>
 
-        {attendanceSummary && (
+        {attendanceSummary && tab === 'attendance' && (
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mt-4">
             <Stat label="Total Days" value={attendanceSummary.total_days} />
             <Stat label="Present"    value={attendanceSummary.present_days} tone="green" />
@@ -72,7 +89,7 @@ export default function StudentDetail() {
         )}
       </Card>
 
-      <div className="flex flex-wrap gap-2 border-b border-slate-200 dark:border-slate-800 dark:border-slate-800">
+      <div className="flex flex-wrap gap-2 border-b border-slate-200 dark:border-slate-800 no-print">
         {TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -86,6 +103,7 @@ export default function StudentDetail() {
         ))}
       </div>
 
+      {/* 👇 Pass user permissions down if needed, but by default the UI is hidden for print anyway */}
       {tab === 'attendance' && <AttendanceTab studentId={studentId} />}
       {tab === 'exams'      && <ExamsTab rows={exams} />}
       {tab === 'fees'       && <FeesTab rows={fees} />}
@@ -151,10 +169,10 @@ function AttendanceTab({ studentId }) {
               <th className="text-left p-3">Date</th>
               <th className="text-left p-3">Status</th>
               <th className="text-left p-3">Remarks</th>
-              <th className="text-right p-3">Actions</th>
+              <th className="text-right p-3 no-print">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-slate-700 dark:divide-slate-700">
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
             {rows.map((r) => (
               <tr key={r.id}>
                 <td className="p-3 font-mono text-xs">{r.date}</td>
@@ -168,7 +186,7 @@ function AttendanceTab({ studentId }) {
                     />
                   ) : (r.remarks || '—')}
                 </td>
-                <td className="p-3 text-right">
+                <td className="p-3 text-right no-print">
                   {editRow?.id === r.id ? (
                     <div className="flex justify-end gap-1">
                       <button onClick={saveRemarks} className="text-xs text-green-600 font-medium">Save</button>
@@ -200,7 +218,7 @@ function ExamsTab({ rows }) {
             <th className="text-left p-3">Remarks</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100 dark:divide-slate-700 dark:divide-slate-700">
+        <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
           {rows.map((r) => (
             <tr key={r.id}>
               <td className="p-3">{r.exam_name}<div className="text-xs text-slate-400">{r.type_name}</div></td>
@@ -228,7 +246,7 @@ function FeesTab({ rows }) {
             <th className="text-left p-3">Date</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100 dark:divide-slate-700 dark:divide-slate-700">
+        <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
           {rows.map((r) => (
             <tr key={r.id}>
               <td className="p-3 font-mono text-xs">{r.invoice_number || r.id}</td>
@@ -256,7 +274,7 @@ function HomeworkTab({ rows }) {
             <th className="text-left p-3">Submitted</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100 dark:divide-slate-700 dark:divide-slate-700">
+        <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
           {rows.map((r, i) => (
             <tr key={i}>
               <td className="p-3">{r.title}</td>
