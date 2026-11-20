@@ -1,32 +1,31 @@
 import { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
-  X, ChevronDown, ChevronRight, CheckSquare, Eye, Plus, Pencil, Settings,
+  X, ChevronDown, ChevronRight, CheckSquare, Eye, Settings,
+  FolderArchive,
 } from 'lucide-react';
 import {
-  LayoutDashboard, CalendarCheck, Users, GraduationCap, BookOpen,
+  LayoutDashboard, CalendarCheck, Users, GraduationCap, BookOpen, BookMarked,
   FileText, DollarSign, Library as LibraryIcon, ClipboardList, Bell, User,
   School, UserCheck, Award,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 
-// NOTE: `Attendance` and `Timetable` are intentionally NOT in these arrays
-// for admin/teacher — they're rendered as collapsible submenus below.
-// Students get `My Attendance` as a top-level link instead.
 const NAV_BY_ROLE = {
   admin: [
     { to: '/dashboard',      label: 'Dashboard',     icon: LayoutDashboard },
     { to: '/pending-users',  label: 'Pending Users', icon: UserCheck },
     { to: '/classes',        label: 'Classes',       icon: School },
+    { to: '/subjects',       label: 'Subjects',      icon: BookMarked },
     { to: '/students',       label: 'Students',      icon: Users },
     { to: '/teachers',       label: 'Teachers',      icon: GraduationCap },
-    // Attendance submenu is rendered specially below
-    // Timetable submenu is rendered specially below
+    { to: '/timetable',      label: 'Timetable',     icon: BookOpen },
     { to: '/exams',          label: 'Exams',         icon: FileText },
     { to: '/mcq',            label: 'MCQ Tests',     icon: FileText },
     { to: '/homework',       label: 'Homework',      icon: ClipboardList },
     { to: '/fees',           label: 'Fees',          icon: DollarSign },
+    { to: '/documents',      label: 'Documents',     icon: FolderArchive },
     { to: '/library',        label: 'Library',       icon: LibraryIcon },
     { to: '/notices',        label: 'Notices',       icon: Bell },
     { to: '/profile',        label: 'Profile',       icon: User },
@@ -35,13 +34,14 @@ const NAV_BY_ROLE = {
   teacher: [
     { to: '/dashboard',      label: 'Dashboard',     icon: LayoutDashboard },
     { to: '/classes',        label: 'Classes',       icon: School },
+    { to: '/subjects',       label: 'Subjects',      icon: BookMarked },
     { to: '/students',       label: 'Students',      icon: Users },
     { to: '/teachers',       label: 'Teachers',      icon: GraduationCap },
-    // Attendance submenu is rendered specially below
-    // Timetable submenu is rendered specially below
+    { to: '/timetable',      label: 'Timetable',     icon: BookOpen },
     { to: '/exams',          label: 'Exams',         icon: FileText },
     { to: '/mcq',            label: 'MCQ Tests',     icon: FileText },
     { to: '/homework',       label: 'Homework',      icon: ClipboardList },
+    { to: '/documents',      label: 'Documents',     icon: FolderArchive },
     { to: '/library',        label: 'Library',       icon: LibraryIcon },
     { to: '/notices',        label: 'Notices',       icon: Bell },
     { to: '/profile',        label: 'Profile',       icon: User },
@@ -59,6 +59,7 @@ const NAV_BY_ROLE = {
   accountant: [
     { to: '/dashboard',      label: 'Dashboard',     icon: LayoutDashboard },
     { to: '/fees',           label: 'Fees',          icon: DollarSign },
+    { to: '/documents',      label: 'Documents',     icon: FolderArchive },
     { to: '/notices',        label: 'Notices',       icon: Bell },
     { to: '/profile',        label: 'Profile',       icon: User },
   ],
@@ -72,29 +73,27 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
   const role = user?.role;
   const isAdmin = role === 'admin';
 
-  // 👇 Parse user permissions
   let userPerms = {};
   try { userPerms = JSON.parse(user.permissions || '{}'); } catch (e) {}
 
-  // 👇 Filter main navigation based on permissions
   const rawNav = NAV_BY_ROLE[role] || NAV_BY_ROLE.student;
   const nav = rawNav.filter((item) => {
-    if (isAdmin) return true; // Admin sees everything
+    if (isAdmin) return true;
     if (item.to === '/students' && !userPerms.view_student) return false;
     if (item.to === '/classes' && !userPerms.view_class) return false;
+    if (item.to === '/documents') {
+      if (role === 'student') return false;
+      if (role === 'teacher' || role === 'accountant') {
+        return !!userPerms.view_documents;
+      }
+    }
     return true;
   });
 
-  // 👇 Check specific submenu permissions
   const hasAttendanceMenu = (role === 'admin' || role === 'teacher') && (isAdmin || userPerms.view_attendance);
-  const hasTimetableMenu = role === 'admin' || role === 'teacher';
 
-  // Auto-open submenus if we're already on a matching route
   const [attendanceOpen, setAttendanceOpen] = useState(
     location.pathname.startsWith('/attendance')
-  );
-  const [timetableOpen, setTimetableOpen] = useState(
-    location.pathname.startsWith('/timetable')
   );
 
   const linkClass = ({ isActive }) =>
@@ -127,7 +126,6 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
           </NavLink>
         ))}
 
-        {/* Collapsible Attendance submenu — admin & teacher only */}
         {hasAttendanceMenu && (
           <div>
             <button
@@ -150,66 +148,17 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
 
             {attendanceOpen && (
               <div className="ml-5 mt-0.5 pl-2 border-l border-slate-200 dark:border-slate-800 flex flex-col gap-0.5">
-                {/* 👇 Hide View Attendance if no permission */}
                 {(isAdmin || userPerms.view_attendance) && (
                   <NavLink to="/attendance/view" className={subLinkClass} onClick={onClose}>
                     <Eye className="w-3.5 h-3.5" /> View Attendance
                   </NavLink>
                 )}
                 
-                {/* 👇 Hide Mark Attendance if no edit permission */}
                 {(isAdmin || userPerms.edit_attendance) && (
                   <NavLink to="/attendance" className={subLinkClass} onClick={onClose}>
                     <CheckSquare className="w-3.5 h-3.5" /> Mark Attendance
                   </NavLink>
                 )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Collapsible Timetable submenu — admin & teacher only */}
-        {hasTimetableMenu && (
-          <div>
-            <button
-              type="button"
-              onClick={() => setTimetableOpen((v) => !v)}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition ${
-                location.pathname.startsWith('/timetable')
-                  ? 'bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-300 font-medium'
-                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
-            >
-              <span className="flex items-center gap-2.5">
-                <BookOpen className="w-4 h-4" />
-                Timetable
-              </span>
-              {timetableOpen
-                ? <ChevronDown className="w-4 h-4" />
-                : <ChevronRight className="w-4 h-4" />}
-            </button>
-
-            {timetableOpen && (
-              <div className="ml-5 mt-0.5 pl-2 border-l border-slate-200 dark:border-slate-800 flex flex-col gap-0.5">
-                <NavLink to="/timetable/view" className={subLinkClass} onClick={onClose}>
-                  <Eye className="w-3.5 h-3.5" /> View
-                </NavLink>
-                
-                {/* 👇 Timetable Add/Edit typically requires admin, or you can add permissions for it later */}
-                {isAdmin && (
-                  <>
-                    <NavLink to="/timetable/add" className={subLinkClass} onClick={onClose}>
-                      <Plus className="w-3.5 h-3.5" /> Add
-                    </NavLink>
-                    <NavLink to="/timetable/edit" className={subLinkClass} onClick={onClose}>
-                      <Pencil className="w-3.5 h-3.5" /> Edit
-                    </NavLink>
-                  </>
-                )}
-                
-                <NavLink to="/timetable" className={subLinkClass} onClick={onClose} end>
-                  <BookOpen className="w-3.5 h-3.5" /> Classic
-                </NavLink>
               </div>
             )}
           </div>
@@ -234,3 +183,4 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
     </>
   );
 }
+

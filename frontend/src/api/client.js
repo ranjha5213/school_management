@@ -1,7 +1,11 @@
 import axios from 'axios';
 
+// Use a relative path. Vite will proxy this to the backend.
+const dynamicBaseURL = `/api`; 
+
 const client = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '/api',
+  // Keep your env variable if you have one, otherwise default to /api
+  baseURL: import.meta.env.VITE_API_URL || dynamicBaseURL,
   timeout: 40000,
 });
 

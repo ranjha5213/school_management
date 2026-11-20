@@ -77,7 +77,7 @@ const createTeacher = async (req, res, next) => {
       department_id: department_id || null,
       qualification: qualification || null,
       join_date: join_date || null,
-      salary: salary || null,
+      salary_cents: salary_cents || null,
     });
 
     logger.audit(`Teacher created: ${name} (${code})`);

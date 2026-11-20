@@ -1,26 +1,27 @@
 const express = require('express');
 const router = express.Router();
 
-router.use('/auth',       require('./auth'));
-router.use('/students',   require('./students'));
-router.use('/teachers',   require('./teachers'));
-router.use('/classes',    require('./classes'));
 router.use('/attendance', require('./attendance'));
-router.use('/exams',      require('./exams'));
-router.use('/homework',   require('./homework'));
-router.use('/fees',       require('./fees'));
-router.use('/library',    require('./library'));
-router.use('/notices',    require('./notices'));
-router.use('/timetable',  require('./timetable'));
-router.use('/reports',    require('./reports'));
 router.use('/audit',      require('./audit'));
+router.use('/classes',    require('./classes'));
+router.use('/documents',  require('./documents'));
+router.use('/exams',      require('./exams'));
+router.use('/fees',       require('./fees'));
+router.use('/homework',   require('./homework'));
+router.use('/library',    require('./library'));
+router.use('/materials',  require('./materials'));
+router.use('/mcq',        require('./mcq'));
+router.use('/notices',    require('./notices'));
 router.use('/parent',     require('./parent'));
+router.use('/reports',    require('./reports'));
 router.use('/search',     require('./search'));
+router.use('/settings',   require('./settings'));
+router.use('/students',   require('./students'));
+router.use('/subjects',   require('./subjects'));
+router.use('/teachers',   require('./teachers'));
+router.use('/timetable',  require('./timetable'));
+router.use('/users',      require('./users'));
+router.use('/auth',       require('./auth'));
 
-router.use('/mcq',          require('./mcq'));
-router.use('/users',        require('./users'));
-router.use('/settings',     require('./settings'));
-router.use('/materials',    require('./materials'));
-
-router.use('/subjects', require('./subjects'));
 module.exports = router;
+

@@ -9,8 +9,8 @@ import Card from '../components/Card';
 import Avatar from '../components/Avatar';
 import Loader from '../components/Loader';
 import Empty from '../components/Empty';
-import PrintHeader from '../components/PrintHeader'; // 👈 ADDED
-import PrintShare from '../components/PrintShare';   // 👈 ADDED
+import PrintHeader from '../components/PrintHeader'; // 👈 ADDE
+import PrintShare from '../components/PrintShare';   // 👈 ADDED79
 import { studentsApi, attendanceApi } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 

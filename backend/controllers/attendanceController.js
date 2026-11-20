@@ -2,6 +2,7 @@ const AttendanceModel = require('../models/attendanceModel');
 const StudentModel = require('../models/studentModel');
 const { apiResponse, todayISO } = require('../utils/helpers');
 const realtime = require('../realtime/socket');
+const { notifyAttendance } = require('../services/attendanceNotify');
 
 const markAttendance = async (req, res, next) => {
   try {
@@ -19,6 +20,16 @@ const markAttendance = async (req, res, next) => {
         `Locked (marked by ${lock.marked_by_name || 'user#' + lock.marked_by} at ${lock.marked_at})`);
 
     await AttendanceModel.insert({ student_id, date, status, remarks, marked_by: req.user.id });
+    
+    // Fire SMS async — never blocks the response, never throws into it.
+    setImmediate(() => {
+      notifyAttendance({
+        records: [{ student_id, status, date }],
+        date,
+        markedBy: req.user.name || `user#${req.user.id}`,
+      }).catch((e) => require('../utils/logger').error('[attendance] sms crash:', e));
+    });
+
     return apiResponse(res, 201, true, 'Attendance marked');
   } catch (e) { next(e); }
 };
@@ -57,6 +68,15 @@ const bulkMarkAttendance = async (req, res, next) => {
       marked_by: req.user.id,
       marked_by_name: req.user.name,
       at: new Date().toISOString(),
+    });
+
+    // Fire SMS async — socket emit already went out; parents get texts shortly.
+    setImmediate(() => {
+      notifyAttendance({
+        records,
+        date,
+        markedBy: req.user.name || `user#${req.user.id}`,
+      }).catch((e) => require('../utils/logger').error('[attendance] sms crash:', e));
     });
 
     return apiResponse(res, 201, true, `${records.length} records saved`);
@@ -209,16 +229,23 @@ const sectionDetail = async (req, res, next) => {
     const sectionId = Number(req.params.sectionId);
     const date = req.query.date || new Date().toISOString().slice(0, 10);
     const students = await AttendanceModel.sectionRoster(sectionId, date);
-    return apiResponse(res, 200, true, 'Section detail',
-      { sectionId, date, students });
+    return apiResponse(res, 200, true, 'Section detail', { sectionId, date, students });
   } catch (e) { next(e); }
 };
 
-
 module.exports = {
-overview, sectionDetail,
-  markAttendance, bulkMarkAttendance, updateRemarks,
-  getAttendanceByDate, getStudentAttendance, getStudentSummary, getClassSummary,
-  getMyAttendance, getMySummary, unlockSectionDate,
+  overview,
+  sectionDetail,
+  markAttendance,
+  bulkMarkAttendance,
+  updateRemarks,
+  getAttendanceByDate,
+  getStudentAttendance,
+  getStudentSummary,
+  getClassSummary,
+  getMyAttendance,
+  getMySummary,
+  unlockSectionDate,
   updateAttendance,
 };
+

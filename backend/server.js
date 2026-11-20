@@ -16,9 +16,41 @@ const { close: closeDb } = require('./config/database');
 
 const app = express();
 
+// Disable ETag so Express does not return 304 Not Modified responses
+app.set('etag', false);
+
+/**
+ * Parse CORS_ORIGIN into something the `cors` middleware accepts.
+ *   CORS_ORIGIN=*                              → allow any (no credentials)
+ *   CORS_ORIGIN=http://a:5173,http://b:5173    → allow-list (credentials ok)
+ */
+const buildCorsConfig = () => {
+  const raw = (process.env.CORS_ORIGIN || '*').trim();
+
+  if (raw === '*') {
+    // Wildcard + credentials is rejected by browsers, so drop credentials.
+    return { origin: '*', credentials: false };
+  }
+
+  const origins = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  return { origin: origins, credentials: true };
+};
+
+const noCacheMiddleware = (_req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  res.set('Surrogate-Control', 'no-store');
+  next();
+};
+
 // Security & Middleware
 app.use(helmet());
-app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
+app.use(cors(buildCorsConfig()));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('combined', { stream: { write: (m) => logger.access(m.trim()) } }));
@@ -26,9 +58,9 @@ app.use(morgan('combined', { stream: { write: (m) => logger.access(m.trim()) } }
 // Static files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Health check & API Routes
+// Health check & API Routes (no-cache applied to /api)
 app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
-app.use('/api', routes);
+app.use('/api', noCacheMiddleware, routes);
 
 // 404 & Error Handlers
 app.use(notFound);
@@ -45,11 +77,11 @@ server.listen(PORT, () => {
   logger.info(`Server on :${PORT}`);
 
   // Start background schedulers safely after server starts
-  try { 
-    startMcqScheduler(); 
+  try {
+    startMcqScheduler();
     logger.info('MCQ Scheduler started successfully');
-  } catch (e) { 
-    logger.error('Scheduler init failed:', e); 
+  } catch (e) {
+    logger.error('Scheduler init failed:', e);
   }
 });
 

@@ -127,7 +127,7 @@ const TimetableModel = {
   // ─── Lookups for the form ───
   subjectsForSection: (section_id) =>
     all(
-      `SELECT sub.id, sub.subject_name, sub.subject_code
+      `SELECT DISTINCT sub.id, sub.subject_name, sub.subject_code
        FROM subjects sub
        JOIN sections sec ON sec.id = ?
        WHERE sub.class_id = sec.class_id OR sub.class_id IS NULL

@@ -5,34 +5,51 @@ import Card from '../components/Card';
 import Loader from '../components/Loader';
 import Empty from '../components/Empty';
 import ConfirmDelete from '../components/ConfirmDelete';
+import AddTeacherModal from '../components/AddTeacherModal';
 import { teachersApi } from '../api/endpoints';
+
+const DEFAULT_PERMISSIONS = {
+  view_student: true,
+  add_student: false,
+  edit_student: false,
+  delete_student: false,
+  view_class: true,
+  add_class: false,
+  edit_class: false,
+  delete_class: false,
+  view_attendance: true,
+  edit_attendance: false,
+  view_documents: false,
+};
 
 export default function Teachers() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
-  
+
   // Modals state
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editingTeacher, setEditingTeacher] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
 
-  // Form state for adding/editing
+  // Form state for editing
   const [formData, setFormData] = useState({
-    name: '', email: '', phone: '', employee_code: '', qualification: '', department_id: ''
+    name: '',
+    email: '',
+    phone: '',
+    employee_code: '',
+    qualification: '',
+    department_id: '',
   });
 
-  // 👇 Updated Permissions state with view_* keys
-  const [permissions, setPermissions] = useState({
-    view_student: true, add_student: false, edit_student: false, delete_student: false,
-    view_class: true, add_class: false, edit_class: false, delete_class: false,
-    view_attendance: true, edit_attendance: false
-  });
+  // Permissions state
+  const [permissions, setPermissions] = useState({ ...DEFAULT_PERMISSIONS });
 
   const fetchTeachers = () => {
     setLoading(true);
-    teachersApi.list()
-      .then((d) => setRows(d || []))
+    teachersApi
+      .list()
+      .then((d) => setRows(Array.isArray(d) ? d : d?.data || []))
       .catch((err) => toast.error(err.message || 'Failed to load teachers'))
       .finally(() => setLoading(false));
   };
@@ -52,40 +69,45 @@ export default function Teachers() {
         qualification: editingTeacher.qualification || '',
         department_id: editingTeacher.department_id || '',
       });
-      
-      // Parse the permissions JSON from the database
+
       try {
-        const parsed = editingTeacher.permissions ? JSON.parse(editingTeacher.permissions) : {};
+        const parsed = editingTeacher.permissions
+          ? typeof editingTeacher.permissions === 'string'
+            ? JSON.parse(editingTeacher.permissions)
+            : editingTeacher.permissions
+          : {};
         setPermissions({
-          view_student: parsed.view_student ?? true, // Default to true if not set
-          add_student: parsed.add_student || false,
-          edit_student: parsed.edit_student || false,
-          delete_student: parsed.delete_student || false,
-          
+          view_student: parsed.view_student ?? true,
+          add_student: Boolean(parsed.add_student),
+          edit_student: Boolean(parsed.edit_student),
+          delete_student: Boolean(parsed.delete_student),
           view_class: parsed.view_class ?? true,
-          add_class: parsed.add_class || false,
-          edit_class: parsed.edit_class || false,
-          delete_class: parsed.delete_class || false,
-          
+          add_class: Boolean(parsed.add_class),
+          edit_class: Boolean(parsed.edit_class),
+          delete_class: Boolean(parsed.delete_class),
           view_attendance: parsed.view_attendance ?? true,
-          edit_attendance: parsed.edit_attendance || false,
+          edit_attendance: Boolean(parsed.edit_attendance),
+          view_documents: Boolean(parsed.view_documents),
         });
       } catch (e) {
-        console.error("Failed to parse permissions", e);
+        console.error('Failed to parse permissions', e);
+        setPermissions({ ...DEFAULT_PERMISSIONS });
       }
     } else {
-      // Reset form when closing
-      setFormData({ name: '', email: '', phone: '', employee_code: '', qualification: '', department_id: '' });
-      setPermissions({
-        view_student: true, add_student: false, edit_student: false, delete_student: false,
-        view_class: true, add_class: false, edit_class: false, delete_class: false,
-        view_attendance: true, edit_attendance: false
+      setFormData({
+        name: '',
+        email: '',
+        phone: '',
+        employee_code: '',
+        qualification: '',
+        department_id: '',
       });
+      setPermissions({ ...DEFAULT_PERMISSIONS });
     }
   }, [editingTeacher]);
 
   const handlePermissionChange = (key) => {
-    setPermissions(prev => ({ ...prev, [key]: !prev[key] }));
+    setPermissions((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   const handleUpdateSubmit = async (e) => {
@@ -93,7 +115,7 @@ export default function Teachers() {
     try {
       const payload = {
         ...formData,
-        permissions: permissions // 👈 Send permissions to backend
+        permissions,
       };
       await teachersApi.update(editingTeacher.id, payload);
       toast.success('Teacher updated successfully');
@@ -109,7 +131,7 @@ export default function Teachers() {
     try {
       await teachersApi.remove(deletingId);
       toast.success('Teacher removed successfully');
-      setRows(rows.filter((r) => r.id !== deletingId));
+      setRows((prev) => prev.filter((r) => r.id !== deletingId));
       setDeletingId(null);
     } catch (err) {
       toast.error(err.message || 'Failed to delete teacher');
@@ -117,10 +139,11 @@ export default function Teachers() {
   };
 
   const filtered = q
-    ? rows.filter((r) =>
-        r.name?.toLowerCase().includes(q.toLowerCase()) ||
-        r.email?.toLowerCase().includes(q.toLowerCase()) ||
-        r.employee_code?.toLowerCase().includes(q.toLowerCase())
+    ? rows.filter(
+        (r) =>
+          r.name?.toLowerCase().includes(q.toLowerCase()) ||
+          r.email?.toLowerCase().includes(q.toLowerCase()) ||
+          r.employee_code?.toLowerCase().includes(q.toLowerCase())
       )
     : rows;
 
@@ -131,9 +154,10 @@ export default function Teachers() {
           <h3 className="font-semibold flex items-center gap-2">
             <Users className="w-4 h-4 text-brand-600" /> Teachers ({filtered.length})
           </h3>
-          
-          <button 
-            onClick={() => setIsAddOpen(true)} 
+
+          <button
+            type="button"
+            onClick={() => setIsAddOpen(true)}
             className="btn btn-primary flex items-center gap-1.5 text-sm whitespace-nowrap"
           >
             <Plus className="w-4 h-4" /> Add Teacher
@@ -169,8 +193,14 @@ export default function Teachers() {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                 {filtered.map((r) => {
                   let permsCount = 0;
-                  try { permsCount = Object.values(JSON.parse(r.permissions || '{}')).filter(Boolean).length; } catch(e) {}
-                  
+                  try {
+                    const parsed =
+                      typeof r.permissions === 'string'
+                        ? JSON.parse(r.permissions || '{}')
+                        : r.permissions || {};
+                    permsCount = Object.values(parsed).filter(Boolean).length;
+                  } catch (e) {}
+
                   return (
                     <tr key={r.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                       <td className="p-3 font-medium">{r.name}</td>
@@ -178,7 +208,9 @@ export default function Teachers() {
                       <td className="p-3 font-mono text-xs">{r.employee_code || '—'}</td>
                       <td className="p-3">
                         {r.role === 'admin' ? (
-                          <span className="text-xs bg-brand-100 text-brand-700 px-2 py-1 rounded">Full Admin</span>
+                          <span className="text-xs bg-brand-100 text-brand-700 px-2 py-1 rounded">
+                            Full Admin
+                          </span>
                         ) : (
                           <span className="flex items-center gap-1 text-xs text-slate-500">
                             <Shield className="w-3.5 h-3.5" /> {permsCount} privilege(s)
@@ -187,6 +219,7 @@ export default function Teachers() {
                       </td>
                       <td className="p-3 text-right space-x-1">
                         <button
+                          type="button"
                           onClick={() => setEditingTeacher(r)}
                           className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-800 rounded"
                           title="Edit Teacher & Permissions"
@@ -194,6 +227,7 @@ export default function Teachers() {
                           <Edit className="w-4 h-4" />
                         </button>
                         <button
+                          type="button"
                           onClick={() => setDeletingId(r.id)}
                           className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-slate-800 rounded"
                           title="Remove Teacher"
@@ -202,7 +236,7 @@ export default function Teachers() {
                         </button>
                       </td>
                     </tr>
-                  )
+                  );
                 })}
               </tbody>
             </table>
@@ -210,12 +244,25 @@ export default function Teachers() {
         )}
       </Card>
 
+      {/* ── ADD TEACHER MODAL ── */}
+      {isAddOpen && (
+        <AddTeacherModal
+          open={isAddOpen}
+          mode="create"
+          onClose={() => setIsAddOpen(false)}
+          onSaved={() => {
+            setIsAddOpen(false);
+            fetchTeachers();
+          }}
+        />
+      )}
+
       {/* ── EDIT TEACHER MODAL ── */}
       {editingTeacher && (
         <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto">
           <form
             onSubmit={handleUpdateSubmit}
-            className="bg-white dark:bg-slate-900 rounded-lg p-6 w-full max-w-3xl space-y-4 shadow-xl my-8"
+            className="bg-white dark:bg-slate-900 rounded-lg p-6 w-full max-w-4xl space-y-4 shadow-xl my-8"
           >
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold">Edit Teacher & Privileges</h3>
@@ -271,91 +318,143 @@ export default function Teachers() {
               </div>
             </div>
 
-            {/* 👇 PERMISSIONS SECTION 👇 */}
+            {/* ── SYSTEM PRIVILEGES ── */}
             <div className="border-t border-slate-200 dark:border-slate-700 pt-4 mt-4">
               <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
                 <Shield className="w-4 h-4 text-brand-600" /> System Privileges
               </h4>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl">
-                
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl">
                 {/* Students */}
                 <div className="space-y-2">
                   <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Students</p>
                   <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-brand-600 transition font-medium">
-                    <input type="checkbox" checked={permissions.view_student || false} 
-                      onChange={() => handlePermissionChange('view_student')} 
-                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4" />
+                    <input
+                      type="checkbox"
+                      checked={permissions.view_student || false}
+                      onChange={() => handlePermissionChange('view_student')}
+                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4"
+                    />
                     View Students
                   </label>
                   <hr className="border-slate-200 dark:border-slate-700 my-1" />
                   <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-brand-600 transition">
-                    <input type="checkbox" checked={permissions.add_student || false} 
-                      onChange={() => handlePermissionChange('add_student')} 
-                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4" />
+                    <input
+                      type="checkbox"
+                      checked={permissions.add_student || false}
+                      onChange={() => handlePermissionChange('add_student')}
+                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4"
+                    />
                     Add Student
                   </label>
                   <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-brand-600 transition">
-                    <input type="checkbox" checked={permissions.edit_student || false} 
-                      onChange={() => handlePermissionChange('edit_student')} 
-                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4" />
+                    <input
+                      type="checkbox"
+                      checked={permissions.edit_student || false}
+                      onChange={() => handlePermissionChange('edit_student')}
+                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4"
+                    />
                     Edit Student
                   </label>
                   <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-brand-600 transition">
-                    <input type="checkbox" checked={permissions.delete_student || false} 
-                      onChange={() => handlePermissionChange('delete_student')} 
-                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4" />
+                    <input
+                      type="checkbox"
+                      checked={permissions.delete_student || false}
+                      onChange={() => handlePermissionChange('delete_student')}
+                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4"
+                    />
                     Delete Student
                   </label>
                 </div>
 
                 {/* Classes */}
                 <div className="space-y-2">
-                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Classes / Sections</p>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    Classes / Sections
+                  </p>
                   <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-brand-600 transition font-medium">
-                    <input type="checkbox" checked={permissions.view_class || false} 
-                      onChange={() => handlePermissionChange('view_class')} 
-                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4" />
+                    <input
+                      type="checkbox"
+                      checked={permissions.view_class || false}
+                      onChange={() => handlePermissionChange('view_class')}
+                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4"
+                    />
                     View Classes
                   </label>
                   <hr className="border-slate-200 dark:border-slate-700 my-1" />
                   <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-brand-600 transition">
-                    <input type="checkbox" checked={permissions.add_class || false} 
-                      onChange={() => handlePermissionChange('add_class')} 
-                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4" />
+                    <input
+                      type="checkbox"
+                      checked={permissions.add_class || false}
+                      onChange={() => handlePermissionChange('add_class')}
+                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4"
+                    />
                     Add Class/Section
                   </label>
                   <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-brand-600 transition">
-                    <input type="checkbox" checked={permissions.edit_class || false} 
-                      onChange={() => handlePermissionChange('edit_class')} 
-                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4" />
+                    <input
+                      type="checkbox"
+                      checked={permissions.edit_class || false}
+                      onChange={() => handlePermissionChange('edit_class')}
+                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4"
+                    />
                     Edit Class/Section
                   </label>
                   <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-brand-600 transition">
-                    <input type="checkbox" checked={permissions.delete_class || false} 
-                      onChange={() => handlePermissionChange('delete_class')} 
-                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4" />
+                    <input
+                      type="checkbox"
+                      checked={permissions.delete_class || false}
+                      onChange={() => handlePermissionChange('delete_class')}
+                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4"
+                    />
                     Delete Class/Section
                   </label>
                 </div>
 
                 {/* Attendance */}
                 <div className="space-y-2">
-                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Attendance</p>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    Attendance
+                  </p>
                   <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-brand-600 transition font-medium">
-                    <input type="checkbox" checked={permissions.view_attendance || false} 
-                      onChange={() => handlePermissionChange('view_attendance')} 
-                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4" />
+                    <input
+                      type="checkbox"
+                      checked={permissions.view_attendance || false}
+                      onChange={() => handlePermissionChange('view_attendance')}
+                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4"
+                    />
                     View Attendance
                   </label>
                   <hr className="border-slate-200 dark:border-slate-700 my-1" />
                   <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-brand-600 transition">
-                    <input type="checkbox" checked={permissions.edit_attendance || false} 
-                      onChange={() => handlePermissionChange('edit_attendance')} 
-                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4" />
+                    <input
+                      type="checkbox"
+                      checked={permissions.edit_attendance || false}
+                      onChange={() => handlePermissionChange('edit_attendance')}
+                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4"
+                    />
                     Mark/Edit Attendance
                   </label>
                 </div>
 
+                {/* Documents */}
+                <div className="space-y-2">
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    Documents
+                  </p>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer hover:text-brand-600 transition font-medium">
+                    <input
+                      type="checkbox"
+                      checked={permissions.view_documents || false}
+                      onChange={() => handlePermissionChange('view_documents')}
+                      className="rounded text-brand-600 focus:ring-brand-500 w-4 h-4"
+                    />
+                    View, Print & Download
+                  </label>
+                  <p className="text-[11px] text-slate-400 leading-snug pt-1">
+                    All staff can upload documents. Once uploaded, records are permanent and cannot be
+                    deleted.
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -388,3 +487,4 @@ export default function Teachers() {
     </div>
   );
 }
+

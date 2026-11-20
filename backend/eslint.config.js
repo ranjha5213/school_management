@@ -14,6 +14,16 @@ module.exports = [
         require: "readonly",
         console: "readonly",
         Buffer: "readonly",
+        
+        // 👇 ADD THESE to fix the setTimeout / setImmediate errors 👇
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
+        setInterval: "readonly",
+        clearInterval: "readonly",
+        setImmediate: "readonly",
+        clearImmediate: "readonly",
+        global: "readonly",
+        exports: "readonly",
       },
     },
     rules: {
@@ -34,4 +44,3 @@ module.exports = [
     },
   },
 ];
-

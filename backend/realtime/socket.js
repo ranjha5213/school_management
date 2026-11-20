@@ -7,12 +7,32 @@ let io = null;
 // Connected sockets indexed by user id → Set of socket ids
 const userSockets = new Map();
 
+/**
+ * Parse CORS_ORIGIN into something socket.io accepts.
+ * Supports:
+ *   CORS_ORIGIN=*                                  → allow any origin (no credentials)
+ *   CORS_ORIGIN=http://a:5173,http://b:5173        → allow-list (credentials ok)
+ */
+const buildCorsConfig = () => {
+  const raw = (process.env.CORS_ORIGIN || '*').trim();
+
+  if (raw === '*') {
+    // Wildcard + credentials is forbidden by browsers, so drop credentials.
+    return { origin: '*', credentials: false };
+  }
+
+  const origins = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  // socket.io/cors accepts a string, array, RegExp, or function.
+  return { origin: origins, credentials: true };
+};
+
 const init = (httpServer) => {
   io = new Server(httpServer, {
-    cors: {
-      origin: process.env.CORS_ORIGIN || '*',
-      credentials: true,
-    },
+    cors: buildCorsConfig(),
     path: '/socket.io',
     pingTimeout: 60000,   // Wait 60s for a pong before timing out (prevents mobile disconnects)
     pingInterval: 25000,  // Send a ping every 25s
@@ -110,4 +130,3 @@ module.exports = {
   emitToAll,
   getIo,
 };
-

@@ -1,6 +1,7 @@
 import client from './client';
 
 const unwrap = (p) => p.then((r) => r.data?.data ?? r.data);
+
 export const authApi = {
   login: (p) => unwrap(client.post('/auth/login', p)),
   me: () => unwrap(client.get('/auth/me')),
@@ -55,8 +56,6 @@ export const studentsApi = {
   attendance: (id, params) => unwrap(client.get(`/students/${id}/attendance`, { params })),
   create: (p) => unwrap(client.post('/students', p)),
   update: (id, p) => unwrap(client.patch(`/students/${id}`, p)),
-  
-  // Updated remove function accepting a cascade option (defaulting to true or false as needed)
   remove: (id, cascade = true) => unwrap(client.delete(`/students/${id}`, { params: { cascade } })),
 };
 
@@ -147,13 +146,23 @@ export const timetableApi = {
   mySchedule: () => unwrap(client.get('/timetable/my-schedule')),
   school: () => unwrap(client.get('/timetable/school')),
   search: (params) => unwrap(client.get('/timetable/search', { params })),
-  bySection: (sectionId) => unwrap(client.get(`/timetable/section/${sectionId}`)),
+  
+  // Updated with the correct /weekly backend route suffix
+  bySection: (sectionId) => unwrap(client.get(`/timetable/section/${sectionId}/weekly`)),
+
   subjectsForSection: (sectionId) => unwrap(client.get(`/timetable/subjects/${sectionId}`)),
   teachersForSection: (sectionId) => unwrap(client.get(`/timetable/teachers/${sectionId}`)),
+  grid: (day) => unwrap(client.get(`/timetable/grid/${day}`)),
+  
   get: (id) => unwrap(client.get(`/timetable/${id}`)),
   create: (p) => unwrap(client.post('/timetable', p)),
-  update: (id, p) => unwrap(client.patch(`/timetable/${id}`, p)),
+  update: (id, p) => unwrap(client.put(`/timetable/${id}`, p)),
   remove: (id) => unwrap(client.delete(`/timetable/${id}`)),
+};
+
+export const settingsApi = {
+  get: (key) => unwrap(client.get(`/settings/${key}`)),
+  save: (key, value) => unwrap(client.post('/settings', { key, value })),
 };
 
 export const reportsApi = {
@@ -182,9 +191,10 @@ export const userApi = {
   removeAvatar: () =>
     client.delete('/users/avatar').then((r) => r.data?.data ?? r.data),
 };
+
 export const mcqApi = {
-updateExamSettings: (id, p) => unwrap(client.patch(`/mcq/${id}/`, p)),  
-updateExamSchedule: (id, body) => unwrap(client.patch(`/mcq/${id}/schedule`, body)),
+  updateExamSettings: (id, p) => unwrap(client.patch(`/mcq/${id}/`, p)),  
+  updateExamSchedule: (id, body) => unwrap(client.patch(`/mcq/${id}/schedule`, body)),
   getExamResults:     (id)       => unwrap(client.get(`/mcq/${id}/results`)),
 
   list: () => unwrap(client.get('/mcq')),
@@ -211,7 +221,7 @@ updateExamSchedule: (id, body) => unwrap(client.patch(`/mcq/${id}/schedule`, bod
   removeSubmission: (submissionId) =>
     unwrap(client.delete(`/mcq/submissions/${submissionId}`)),
 
-  // ─── In-app attempts (Stage 5) ───
+  // In-app attempts
   studentExamView: (examId) => unwrap(client.get(`/mcq/${examId}/student-view`)),
   myExams: () => unwrap(client.get('/mcq/my-exams')),
   myAttempts: () => unwrap(client.get('/mcq/my-attempts')),
@@ -240,3 +250,4 @@ updateExamSchedule: (id, body) => unwrap(client.patch(`/mcq/${id}/schedule`, bod
   listRecordings: (attemptId) =>
     unwrap(client.get(`/mcq/attempts/${attemptId}/recordings`)),
 };
+

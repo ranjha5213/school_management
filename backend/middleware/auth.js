@@ -76,17 +76,42 @@ const checkPermission = (permissionName) => {
 // ─── Attach Student ID (Helper for student routes) ───
 // Assuming you had this in your original file, I am adding a basic version.
 // If your original one does something else, keep it.
+// middleware/auth.js
+
+// ─── Attach Student ID (Helper for student routes) ───
 const attachStudentId = async (req, res, next) => {
   try {
-    const student = await get(`SELECT id FROM students WHERE user_id = ?`, [req.user.id]);
-    if (!student) return res.status(404).json({ success: false, message: 'Student profile not found' });
-    req.params.studentId = student.id;
-    next();
+    // 1. If the user is a student, find THEIR student profile
+    if (req.user.role === 'student') {
+      const student = await get(`SELECT id FROM students WHERE user_id = ?`, [req.user.id]);
+      if (!student) {
+        return res.status(404).json({ success: false, message: 'Student profile not found' });
+      }
+      req.params.studentId = student.id;
+      req.studentId = student.id; 
+      return next();
+    }
+
+    // 2. If the user is Admin or Teacher, they don't need a studentId attached.
+    // They are accessing data for the whole class/school.
+    if (req.user.role === 'admin' || req.user.role === 'teacher') {
+      return next();
+    }
+
+    // 3. For any other role (Parent, Accountant), they MUST provide a studentId in the URL
+    // Example: /api/students/45/overview
+    if (req.params.studentId) {
+      req.studentId = req.params.studentId;
+      return next();
+    }
+
+    // 4. If we reach here, it's an unauthorized role or missing ID
+    return res.status(403).json({ success: false, message: 'Forbidden: Student ID required' });
+
   } catch (e) {
     next(e);
   }
 };
-
 module.exports = {
   authenticate,
   authorize,
