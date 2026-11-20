@@ -13,3 +13,23 @@ frontend/src/*.ts.net.*
 # env files
 backend/.env
 .env
+
+# Python files (all)
+*.py
+*.py[cod]
+*.pyo
+*.pyc
+
+# Python caches / build
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+ENV/
+env/
+*.egg-info/
+.eggs/
+build/
+dist/
