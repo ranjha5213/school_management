@@ -9,3 +9,7 @@ uploads/
 backups/
 frontend/src/*.ts.net.*
 *.bak
+
+# env files
+backend/.env
+.env
