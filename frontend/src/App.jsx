@@ -16,6 +16,7 @@ import AttendanceOverview from './pages/AttendanceOverview';
 import Classes from './pages/Classes';
 import Dashboard from './pages/Dashboard';
 import Documents from './pages/Documents';
+import DonationsLedgerPage from './pages/DonationsLedgerPage';
 import Exams from './pages/Exams';
 import Fees from './pages/Fees';
 import ForgotPassword from './pages/ForgotPassword';
@@ -165,6 +166,7 @@ export default function App() {
                 </Route>
 
                 <Route path="*" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/donations" element={<DonationsLedgerPage />} />
               </Routes>
             </BrowserRouter>
           </SocketProvider>

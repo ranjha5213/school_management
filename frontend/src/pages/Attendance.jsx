@@ -251,18 +251,8 @@ export default function Attendance() {
         status: records[s.id],
       }));
 
-      const absent = payload.filter(
-        (r) => r.status === 'absent' || r.status === 'late'
-      ).length;
-      const wantsSms = absent > 0
-        ? window.confirm(
-            `Mark ${payload.length} student(s)? ` +
-            `${absent} absent/late — send SMS to their guardians?`
-          )
-        : false;
-
-      await attendanceApi.bulk(payload, sectionId, { sms: wantsSms, session: apiSession });
-      if (wantsSms) toast.success('Marked + SMS queued to guardians');
+      await attendanceApi.bulk(payload, sectionId, { session: apiSession });
+       toast.success('Marked');
       toast.success(`Saved ${payload.length} records`);
       await loadGrid();
     } catch (e) {

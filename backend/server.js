@@ -57,6 +57,8 @@ app.use(morgan('combined', { stream: { write: (m) => logger.access(m.trim()) } }
 
 // Static files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/static', express.static(path.join(__dirname, 'public')));
+
 
 // Health check & API Routes (no-cache applied to /api)
 app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));

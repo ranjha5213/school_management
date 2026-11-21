@@ -232,8 +232,8 @@ const printSheet = async (req, res, next) => {
       questions,
       student: { ...student, name: student.name },
       school: {
-        name: process.env.SCHOOL_NAME || 'School Management',
-        address: process.env.SCHOOL_ADDRESS || '',
+        name: process.env.SCHOOL_NAME || 'Jamia Hussania Anwar-ul-Quran',
+        address: process.env.SCHOOL_ADDRESS || 'Hujjan, Tehsil Kot Momin',
       },
     });
 
@@ -273,8 +273,8 @@ const printAllSheets = async (req, res, next) => {
         questions,
         student: s,
         school: {
-          name: process.env.SCHOOL_NAME || 'School Management',
-          address: process.env.SCHOOL_ADDRESS || '',
+          name: process.env.SCHOOL_NAME || 'Jamia Hussania Anwar-ul-Quran',
+          address: process.env.SCHOOL_ADDRESS || 'Hujjan, Tehsil Kot Momin',
         },
       });
       // Add each PDF as a new page block by importing pages isn't trivial with pdfkit.
@@ -297,8 +297,8 @@ const printAllSheets = async (req, res, next) => {
       exam, questions,
       student: first,
       school: {
-        name: process.env.SCHOOL_NAME || 'School Management',
-        address: process.env.SCHOOL_ADDRESS || '',
+        name: process.env.SCHOOL_NAME || 'Jamia Hussania Anwar-ul-Quran',
+        address: process.env.SCHOOL_ADDRESS || 'Hujjan, Tehsil Kot Momin',
       },
     });
     res.setHeader('Content-Type', 'application/pdf');

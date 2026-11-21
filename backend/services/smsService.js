@@ -287,7 +287,7 @@ async function sendAttendanceSms({ student, status, date, markedBy }) {
     if (!student) return { ok: false, reason: 'no student' };
     const body = render(
       process.env.SMS_TPL_ATTENDANCE ||
-        'Dear Parent, {name} ({class_name}-{section_name}) is marked {status} on {date}. — GHS Dhori',
+        'Dear Parent, {name} ({class_name}-{section_name}) is marked {status} on {date}. — Jamia Hussania Anwar-ul-Quran',
       {
         name: student.student_name || student.name || 'Student',
         class_name: student.class_name || '',
@@ -320,7 +320,7 @@ async function sendMcqResultSms({ student, exam, attempt }) {
 
     const body = render(
       process.env.SMS_TPL_MCQ ||
-        'Dear Parent, {name} scored {score}/{total} on "{exam}" ({correct} correct, {wrong} wrong, {blank} blank). — GHS Dhori',
+        'Dear Parent, {name} scored {score}/{total} on "{exam}" ({correct} correct, {wrong} wrong, {blank} blank). — Jamia Hussania Anwar-ul-Quran',
       {
         name: student.student_name || student.name || 'Student',
         exam: exam?.title || 'MCQ exam',

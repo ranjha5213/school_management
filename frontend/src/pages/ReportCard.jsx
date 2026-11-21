@@ -69,7 +69,7 @@ export default function ReportCard() {
 
       <Card className="p-6 print:shadow-none print:border-0">
         <div className="text-center border-b border-slate-200 dark:border-slate-800 dark:border-slate-700 pb-4">
-          <h1 className="text-2xl font-bold">School Management</h1>
+          <h1 className="text-2xl font-bold">Jamia Hussania Anwar-ul-Quran</h1>
           <p className="text-sm text-slate-500">Student Report Card</p>
         </div>
 

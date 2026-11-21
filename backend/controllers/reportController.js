@@ -131,8 +131,8 @@ const downloadReportCardPdf = async (req, res, next) => {
       fees: fee_summary,
       generated_at: new Date().toISOString(),
       school: {
-        name: process.env.SCHOOL_NAME || 'School Management',
-        address: process.env.SCHOOL_ADDRESS || '',
+        name: process.env.SCHOOL_NAME || 'Jamia Hussania Anwar-ul-Quran',
+        address: process.env.SCHOOL_ADDRESS || 'Hujjan, Tehsil Kot Momin',
       },
     });
 

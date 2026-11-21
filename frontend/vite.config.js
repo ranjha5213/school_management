@@ -10,7 +10,12 @@ export default defineConfig({
         target: 'http://localhost:5000', // Your backend IP
         changeOrigin: true,
         secure: false,
-      }
+      },
+    '/static': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+        secure: false,
+      },
     }
   }
 });

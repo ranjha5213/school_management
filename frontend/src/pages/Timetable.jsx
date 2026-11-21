@@ -1,86 +1,127 @@
 // src/pages/Timetable.jsx
 import { useEffect, useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
+import { ArrowRight, CalendarDays, Layers, Settings } from 'lucide-react';
 import Card from '../components/Card';
+import Button from '../components/Button';
 import Loader from '../components/Loader';
 import Empty from '../components/Empty';
-import { fmtTime } from '../components/TimetableGrid';
-import { timetableApi } from '../api/endpoints';
+import { classesApi } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 
-const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+export default function Timetable() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
-function PersonalSchedule({ title, emptyHint, apiFn, metaFn }) {
-  const [rows, setRows] = useState(null);
+  const [classes, setClasses] = useState([]);
+  const [sectionsByClass, setSectionsByClass] = useState({});
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    apiFn()
-      .then((d) => !cancelled && setRows(Array.isArray(d) ? d : d?.data || d?.slots || []))
-      .catch(() => !cancelled && setRows([]));
+    async function load() {
+      try {
+        const clsList = await classesApi.list().then((d) => (Array.isArray(d) ? d : d?.data || []));
+        if (cancelled) return;
+        setClasses(clsList);
+
+        const secEntries = await Promise.all(
+          clsList.map(async (c) => {
+            const cId = c.id || c.class_id;
+            const secs = await classesApi
+              .sections(cId)
+              .then((d) => (Array.isArray(d) ? d : d?.data || []))
+              .catch(() => []);
+            return [String(cId), secs];
+          })
+        );
+        if (!cancelled) {
+          setSectionsByClass(Object.fromEntries(secEntries));
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
     return () => {
       cancelled = true;
     };
-  }, [apiFn]);
+  }, []);
 
-  if (rows === null) return <Loader />;
-  if (!rows.length) return <Empty title="Nothing scheduled yet" hint={emptyHint} />;
-
-  const grouped = DAYS.map((day) => ({
-    day,
-    slots: rows
-      .filter((r) => String(r.day_of_week || '').toLowerCase() === day.toLowerCase())
-      .sort((a, b) => String(a.start_time).localeCompare(String(b.start_time))),
-  })).filter((g) => g.slots.length);
+  if (loading) return <Loader />;
 
   return (
-    <div className="space-y-3">
-      <h1 className="text-lg font-semibold">{title}</h1>
-      {grouped.map((g) => (
-        <Card key={g.day} className="p-4">
-          <h3 className="font-medium mb-2">{g.day}</h3>
-          <ul className="space-y-1 text-sm">
-            {g.slots.map((s) => (
-              <li key={s.id} className="flex justify-between gap-2">
-                <span>
-                  {fmtTime(s.start_time)}–{fmtTime(s.end_time)} · {s.subject_name || '—'}
-                </span>
-                <span className="text-slate-500">{metaFn(s)}</span>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      ))}
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-lg font-semibold flex items-center gap-2">
+          <CalendarDays className="w-5 h-5 text-brand-600" /> Timetable Overview
+        </h1>
+        <div className="flex flex-wrap items-center gap-2">
+          {isAdmin && (
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={Settings}
+              onClick={() => navigate('/timetable/settings')}
+            >
+              Timings Settings
+            </Button>
+          )}
+          <Button
+            size="sm"
+            icon={ArrowRight}
+            onClick={() => navigate('/timetable/grid?view=full')}
+          >
+            View Full Timetable
+          </Button>
+        </div>
+      </div>
+
+      {classes.length === 0 ? (
+        <Empty title="No classes found" />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {classes.map((cls) => {
+            const cId = cls.id || cls.class_id;
+            const secs = sectionsByClass[String(cId)] || [];
+            return (
+              <Card key={cId} className="p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h2 className="font-semibold text-sm flex items-center gap-1.5">
+                    <Layers className="w-4 h-4 text-brand-600" />
+                    {cls.class_name || cls.name}
+                  </h2>
+                  <span className="text-xs text-slate-500">{secs.length} section(s)</span>
+                </div>
+
+                {secs.length === 0 ? (
+                  <p className="text-xs text-slate-400">No sections configured yet.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {secs.map((sec) => {
+                      const sId = sec.id || sec.section_id;
+                      return (
+                        <button
+                          key={sId}
+                          type="button"
+                          onClick={() =>
+                            navigate(`/timetable/grid?class=${cId}&section=${sId}`)
+                          }
+                          className="px-3 py-1.5 rounded-md text-xs font-medium bg-slate-100 hover:bg-brand-100 hover:text-brand-800 dark:bg-slate-800 dark:hover:bg-brand-900/40 border border-slate-200 dark:border-slate-700 transition-colors"
+                        >
+                          Section {sec.section_name || sec.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
-}
-
-export default function Timetable() {
-  const { user } = useAuth();
-  if (!user) return <Loader />;
-
-  if (user.role === 'student') {
-    return (
-      <PersonalSchedule
-        title="My Timetable"
-        emptyHint="Your class schedule will appear here once published."
-        apiFn={timetableApi.my}
-        metaFn={(s) => s.teacher_name || '—'}
-      />
-    );
-  }
-
-  if (user.role === 'teacher') {
-    return (
-      <PersonalSchedule
-        title="My Teaching Schedule"
-        emptyHint="Your periods will appear here once scheduled."
-        apiFn={timetableApi.mySchedule}
-        metaFn={(s) => `${s.class_name || '?'}/${s.section_name || '?'}`}
-      />
-    );
-  }
-
-  return <Navigate to="/timetable/grid" replace />;
 }
 

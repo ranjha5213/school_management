@@ -7,29 +7,33 @@ import {
 import {
   LayoutDashboard, CalendarCheck, Users, GraduationCap, BookOpen, BookMarked,
   FileText, DollarSign, Library as LibraryIcon, ClipboardList, Bell, User,
-  School, UserCheck, Award,
+  School, UserCheck, Award, HandCoins,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
+import SchoolLogo from './SchoolLogo';
+
+
 
 const NAV_BY_ROLE = {
   admin: [
-    { to: '/dashboard',      label: 'Dashboard',     icon: LayoutDashboard },
-    { to: '/pending-users',  label: 'Pending Users', icon: UserCheck },
-    { to: '/classes',        label: 'Classes',       icon: School },
-    { to: '/subjects',       label: 'Subjects',      icon: BookMarked },
-    { to: '/students',       label: 'Students',      icon: Users },
-    { to: '/teachers',       label: 'Teachers',      icon: GraduationCap },
-    { to: '/timetable',      label: 'Timetable',     icon: BookOpen },
-    { to: '/exams',          label: 'Exams',         icon: FileText },
-    { to: '/mcq',            label: 'MCQ Tests',     icon: FileText },
-    { to: '/homework',       label: 'Homework',      icon: ClipboardList },
-    { to: '/fees',           label: 'Fees',          icon: DollarSign },
-    { to: '/documents',      label: 'Documents',     icon: FolderArchive },
-    { to: '/library',        label: 'Library',       icon: LibraryIcon },
-    { to: '/notices',        label: 'Notices',       icon: Bell },
-    { to: '/profile',        label: 'Profile',       icon: User },
-    { to: '/settings',       label: 'Settings',      icon: Settings },
+    { to: '/dashboard',      label: 'Dashboard',        icon: LayoutDashboard },
+    { to: '/pending-users',  label: 'Pending Users',    icon: UserCheck },
+    { to: '/classes',        label: 'Classes',          icon: School },
+    { to: '/subjects',       label: 'Subjects',         icon: BookMarked },
+    { to: '/students',       label: 'Students',         icon: Users },
+    { to: '/teachers',       label: 'Teachers',         icon: GraduationCap },
+    { to: '/timetable',      label: 'Timetable',        icon: BookOpen },
+    { to: '/exams',          label: 'Exams',            icon: FileText },
+    { to: '/mcq',            label: 'MCQ Tests',        icon: FileText },
+    { to: '/homework',       label: 'Homework',         icon: ClipboardList },
+    { to: '/fees',           label: 'Fees',             icon: DollarSign },
+    { to: '/donations',      label: 'Donations & Ledger', icon: HandCoins },
+    { to: '/documents',      label: 'Documents',        icon: FolderArchive },
+    { to: '/library',        label: 'Library',          icon: LibraryIcon },
+    { to: '/notices',        label: 'Notices',          icon: Bell },
+    { to: '/profile',        label: 'Profile',          icon: User },
+    { to: '/settings',       label: 'Settings',         icon: Settings },
   ],
   teacher: [
     { to: '/dashboard',      label: 'Dashboard',     icon: LayoutDashboard },
@@ -57,11 +61,12 @@ const NAV_BY_ROLE = {
     { to: '/profile',        label: 'Profile',       icon: User },
   ],
   accountant: [
-    { to: '/dashboard',      label: 'Dashboard',     icon: LayoutDashboard },
-    { to: '/fees',           label: 'Fees',          icon: DollarSign },
-    { to: '/documents',      label: 'Documents',     icon: FolderArchive },
-    { to: '/notices',        label: 'Notices',       icon: Bell },
-    { to: '/profile',        label: 'Profile',       icon: User },
+    { to: '/dashboard',      label: 'Dashboard',        icon: LayoutDashboard },
+    { to: '/fees',           label: 'Fees',             icon: DollarSign },
+    { to: '/donations',      label: 'Donations & Ledger', icon: HandCoins },
+    { to: '/documents',      label: 'Documents',        icon: FolderArchive },
+    { to: '/notices',        label: 'Notices',          icon: Bell },
+    { to: '/profile',        label: 'Profile',          icon: User },
   ],
 };
 
@@ -112,12 +117,31 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
 
   const content = (
     <>
-      <div className="px-3 py-4 font-bold text-brand-600 text-lg flex items-center justify-between">
-        <span className="truncate max-w-[140px]" title={school_name}>{school_name}</span>
-        <button onClick={onClose} className="md:hidden p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800">
-          <X className="w-4 h-4" />
-        </button>
-      </div>
+              <div className="px-3 py-4 font-bold text-brand-600 text-lg flex items-center justify-between gap-2">
+  <div className="flex items-center gap-2.5 min-w-0">
+    <SchoolLogo
+      className="w-9 h-9 object-contain shrink-0 rounded-md"
+      fallbackClassName="w-7 h-7 text-brand-600 shrink-0"
+    />
+    <span
+      dir={/[\u0600-\u06FF]/.test(school_name || '') ? 'rtl' : 'ltr'}
+      lang={/[\u0600-\u06FF]/.test(school_name || '') ? 'ur' : undefined}
+      className={
+        /[\u0600-\u06FF]/.test(school_name || '')
+          ? 'truncate max-w-[140px] font-urdu text-base'
+          : 'truncate max-w-[140px]'
+      }
+      title={school_name}
+    >
+      {school_name}
+    </span>
+  </div>
+  <button onClick={onClose} className="md:hidden p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0">
+    <X className="w-4 h-4" />
+  </button>
+</div>
+
+
       <nav className="flex flex-col gap-0.5">
         {nav.map(({ to, label, icon: Icon }) => (
           <NavLink key={to} to={to} className={linkClass} onClick={onClose}>

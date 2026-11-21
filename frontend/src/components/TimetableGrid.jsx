@@ -1,6 +1,6 @@
 // src/components/TimetableGrid.jsx
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, BookOpen, Calendar, User } from 'lucide-react';
+import { AlertTriangle, BookOpen, Calendar, User, X } from 'lucide-react';
 import Card from './Card';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -36,9 +36,6 @@ const getTeacherLinkedSubject = (t, subjectIdToName) => {
   return '';
 };
 
-/**
- * Ranks section subjects by prefix match first (full name prefix > word prefix > substring).
- */
 function rankSubjectMatches(query, subjectList) {
   const q = normalizeText(query);
   if (!q) return [];
@@ -65,10 +62,6 @@ function rankSubjectMatches(query, subjectList) {
     .slice(0, 6);
 }
 
-/**
- * Ranks teachers by prefix match first (full name prefix > word prefix > substring),
- * boosting teachers whose subject matches `preferredSubject`.
- */
 function rankTeacherMatches(query, teacherList, preferredSubject = '') {
   const q = normalizeText(query);
   if (!q) return [];
@@ -130,7 +123,8 @@ function SlotCell({
   subjectCatalog,
   teacherCatalog,
   teacherSubjectMap,
-  visible,
+  isHighlighted,
+  isDimmed,
   isEditable,
   conflictText,
   onUpdateCell,
@@ -138,7 +132,7 @@ function SlotCell({
   const [subjectDraft, setSubjectDraft] = useState(currentSubject);
   const [teacherDraft, setTeacherDraft] = useState(currentTeacher);
   const [focusedField, setFocusedField] = useState(null);
-  const [openDropdown, setOpenDropdown] = useState(null); // 'subject' | 'teacher' | null
+  const [openDropdown, setOpenDropdown] = useState(null);
   const [activeSubjectIdx, setActiveSubjectIdx] = useState(0);
   const [activeTeacherIdx, setActiveTeacherIdx] = useState(0);
 
@@ -186,7 +180,6 @@ function SlotCell({
     setActiveTeacherIdx(0);
   }, [teacherDraft]);
 
-  // --- Subject handlers (strictly from active section's subjects) ---
   const applySubjectSelection = (subjItem) => {
     const chosenSubject = subjItem.name;
     setSubjectDraft(chosenSubject);
@@ -258,7 +251,6 @@ function SlotCell({
     }
   };
 
-  // --- Teacher handlers (from teachers catalog + auto-pulls linked subject if empty) ---
   const applyTeacherSelection = (match) => {
     const chosenName = match.name;
     const pulledSubject =
@@ -367,129 +359,153 @@ function SlotCell({
   const hasConflict = Boolean(conflictText);
 
   if (isEditable) {
+    const printableSubject = (subjectDraft || currentSubject || '').trim();
+    const printableTeacher = (teacherDraft || currentTeacher || '').trim();
+
     return (
       <div
         ref={cellRef}
-        className={`relative flex flex-col gap-1.5 p-1 rounded border transition-colors ${
+        className={`relative flex flex-col gap-1.5 p-1 rounded border transition-all ${
           hasConflict
             ? 'bg-red-50/90 dark:bg-red-950/35 border-red-400 dark:border-red-500/70'
+            : isHighlighted
+            ? 'bg-emerald-50/90 dark:bg-emerald-950/30 border-emerald-400 ring-2 ring-emerald-300/60'
+            : isDimmed
+            ? 'opacity-40 print:opacity-100 bg-slate-50 dark:bg-slate-800/30 border-slate-200 dark:border-slate-700'
             : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700'
         }`}
       >
-        {/* Subject Input — searches only subjects for the section under edit */}
-        <div className="relative">
-          <input
-            type="text"
-            autoComplete="off"
-            className="input text-xs py-1 text-center font-semibold"
-            placeholder="Subject Name"
-            value={subjectDraft}
-            onFocus={() => {
-              setFocusedField('subject');
-              if (subjectDraft.trim()) setOpenDropdown('subject');
-            }}
-            onChange={handleSubjectChange}
-            onBlur={handleSubjectBlur}
-            onKeyDown={handleSubjectKeyDown}
-          />
+        <div className="text-[10px] text-slate-400 dark:text-slate-500 font-mono text-center">
+          {fmtTime(period.start_time)}–{fmtTime(period.end_time)}
+        </div>
 
-          {openDropdown === 'subject' && subjectSuggestions.length > 0 && (
-            <div
-              role="listbox"
-              className="absolute left-0 right-0 top-full mt-1 z-30 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md shadow-lg max-h-44 overflow-y-auto text-left"
-            >
-              {subjectSuggestions.map((item, idx) => {
-                const isActive = idx === activeSubjectIdx;
-                return (
-                  <button
-                    key={item.key}
-                    type="button"
-                    role="option"
-                    aria-selected={isActive}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      applySubjectSelection(item);
-                    }}
-                    onMouseEnter={() => setActiveSubjectIdx(idx)}
-                    className={`w-full px-2.5 py-1.5 text-xs flex items-center justify-between gap-2 border-b last:border-b-0 border-slate-100 dark:border-slate-800 transition-colors ${
-                      isActive
-                        ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-900 dark:text-brand-100'
-                        : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/70'
-                    }`}
-                  >
-                    <span className="font-semibold truncate">{item.name}</span>
-                    {item.code && (
-                      <span className="text-[10px] text-slate-400 shrink-0">{item.code}</span>
-                    )}
-                  </button>
-                );
-              })}
+        {/* Print-only text so subject & teacher appear when printing editable grids */}
+        <div className="hidden print:block text-center leading-tight text-black">
+          <div className="font-semibold">
+            {printableSubject || '—'}
+          </div>
+          {printableTeacher && (
+            <div className="text-[8px] mt-0.5">
+              {printableTeacher}
             </div>
           )}
         </div>
 
-        {/* Teacher Input — searches teachers catalog & auto-pulls linked subject */}
-        <div className="relative">
-          <input
-            type="text"
-            autoComplete="off"
-            className={`input text-xs py-1 text-center ${
-              hasConflict
-                ? 'border-red-400 text-red-800 dark:text-red-200 font-medium'
-                : 'text-slate-600 dark:text-slate-400'
-            }`}
-            placeholder="Teacher Name"
-            value={teacherDraft}
-            onFocus={() => {
-              setFocusedField('teacher');
-              if (teacherDraft.trim()) setOpenDropdown('teacher');
-            }}
-            onChange={handleTeacherChange}
-            onBlur={handleTeacherBlur}
-            onKeyDown={handleTeacherKeyDown}
-          />
+        {/* Screen editing inputs (hidden during print) */}
+        <div className="print:hidden flex flex-col gap-1.5">
+          <div className="relative">
+            <input
+              type="text"
+              autoComplete="off"
+              className="input text-xs py-1 text-center font-semibold"
+              placeholder="Subject Name"
+              value={subjectDraft}
+              onFocus={() => {
+                setFocusedField('subject');
+                if (subjectDraft.trim()) setOpenDropdown('subject');
+              }}
+              onChange={handleSubjectChange}
+              onBlur={handleSubjectBlur}
+              onKeyDown={handleSubjectKeyDown}
+            />
 
-          {openDropdown === 'teacher' && teacherSuggestions.length > 0 && (
-            <div
-              role="listbox"
-              className="absolute left-0 right-0 top-full mt-1 z-30 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md shadow-lg max-h-44 overflow-y-auto text-left"
-            >
-              {teacherSuggestions.map((item, idx) => {
-                const isActive = idx === activeTeacherIdx;
-                return (
-                  <button
-                    key={item.key}
-                    type="button"
-                    role="option"
-                    aria-selected={isActive}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      applyTeacherSelection(item);
-                    }}
-                    onMouseEnter={() => setActiveTeacherIdx(idx)}
-                    className={`w-full px-2.5 py-1.5 text-xs flex items-center justify-between gap-2 border-b last:border-b-0 border-slate-100 dark:border-slate-800 transition-colors ${
-                      isActive
-                        ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-900 dark:text-brand-100'
-                        : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/70'
-                    }`}
-                  >
-                    <span className="font-semibold truncate">{item.name}</span>
-                    {item.subject && (
-                      <span className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] font-medium text-slate-600 dark:text-slate-300">
-                        <BookOpen className="w-2.5 h-2.5 text-brand-600" />
-                        {item.subject}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+            {openDropdown === 'subject' && subjectSuggestions.length > 0 && (
+              <div
+                role="listbox"
+                className="absolute left-0 right-0 top-full mt-1 z-30 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md shadow-lg max-h-44 overflow-y-auto text-left"
+              >
+                {subjectSuggestions.map((item, idx) => {
+                  const isActive = idx === activeSubjectIdx;
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      role="option"
+                      aria-selected={isActive}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        applySubjectSelection(item);
+                      }}
+                      onMouseEnter={() => setActiveSubjectIdx(idx)}
+                      className={`w-full px-2.5 py-1.5 text-xs flex items-center justify-between gap-2 border-b last:border-b-0 border-slate-100 dark:border-slate-800 transition-colors ${
+                        isActive
+                          ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-900 dark:text-brand-100'
+                          : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/70'
+                      }`}
+                    >
+                      <span className="font-semibold truncate">{item.name}</span>
+                      {item.code && (
+                        <span className="text-[10px] text-slate-400 shrink-0">{item.code}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="relative">
+            <input
+              type="text"
+              autoComplete="off"
+              className={`input text-xs py-1 text-center ${
+                hasConflict
+                  ? 'border-red-400 text-red-800 dark:text-red-200 font-medium'
+                  : 'text-slate-600 dark:text-slate-400'
+              }`}
+              placeholder="Teacher Name"
+              value={teacherDraft}
+              onFocus={() => {
+                setFocusedField('teacher');
+                if (teacherDraft.trim()) setOpenDropdown('teacher');
+              }}
+              onChange={handleTeacherChange}
+              onBlur={handleTeacherBlur}
+              onKeyDown={handleTeacherKeyDown}
+            />
+
+            {openDropdown === 'teacher' && teacherSuggestions.length > 0 && (
+              <div
+                role="listbox"
+                className="absolute left-0 right-0 top-full mt-1 z-30 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md shadow-lg max-h-44 overflow-y-auto text-left"
+              >
+                {teacherSuggestions.map((item, idx) => {
+                  const isActive = idx === activeTeacherIdx;
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      role="option"
+                      aria-selected={isActive}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        applyTeacherSelection(item);
+                      }}
+                      onMouseEnter={() => setActiveTeacherIdx(idx)}
+                      className={`w-full px-2.5 py-1.5 text-xs flex items-center justify-between gap-2 border-b last:border-b-0 border-slate-100 dark:border-slate-800 transition-colors ${
+                        isActive
+                          ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-900 dark:text-brand-100'
+                          : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/70'
+                      }`}
+                    >
+                      <span className="font-semibold truncate">{item.name}</span>
+                      {item.subject && (
+                        <span className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] font-medium text-slate-600 dark:text-slate-300">
+                          <BookOpen className="w-2.5 h-2.5 text-brand-600" />
+                          {item.subject}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         {hasConflict && (
           <div
-            className="flex items-center justify-center gap-1 text-[10px] font-semibold text-red-700 dark:text-red-300 leading-tight px-1"
+            className="no-print flex items-center justify-center gap-1 text-[10px] font-semibold text-red-700 dark:text-red-300 leading-tight px-1"
             title={conflictText}
           >
             <AlertTriangle className="w-3 h-3 shrink-0" />
@@ -500,39 +516,46 @@ function SlotCell({
     );
   }
 
-  if (slot && visible) {
+  if (slot && !isDimmed) {
     return (
       <div
-        className={`rounded-md p-2 text-xs shadow-sm border ${
+        className={`rounded-md p-2 text-xs shadow-sm border transition-all ${
           hasConflict
             ? 'bg-red-50/90 dark:bg-red-950/35 border-red-400 dark:border-red-500/70'
+            : isHighlighted
+            ? 'bg-emerald-50 dark:bg-emerald-950/35 border-emerald-400 ring-2 ring-emerald-300/60'
             : 'bg-brand-50/80 dark:bg-brand-500/10 border-brand-200/70 dark:border-brand-500/25'
         }`}
         title={conflictText || undefined}
       >
         <div
-          className={`font-semibold truncate ${
+          className={`font-semibold truncate print:whitespace-normal ${
             hasConflict
               ? 'text-red-900 dark:text-red-200'
+              : isHighlighted
+              ? 'text-emerald-900 dark:text-emerald-200'
               : 'text-brand-800 dark:text-brand-300'
           }`}
         >
           {currentSubject || '—'}
         </div>
         <div
-          className={`truncate text-[11px] mt-0.5 ${
+          className={`truncate print:whitespace-normal text-[11px] mt-0.5 ${
             hasConflict
               ? 'text-red-700 dark:text-red-300 font-medium'
+              : isHighlighted
+              ? 'text-emerald-800 dark:text-emerald-300 font-semibold'
               : 'text-slate-600 dark:text-slate-400'
           }`}
         >
           {currentTeacher || '—'}
         </div>
         <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-          {fmtTime(slot.start_time)}–{fmtTime(slot.end_time)}
+          {fmtTime(period?.start_time || slot.start_time)}–
+          {fmtTime(period?.end_time || slot.end_time)}
         </div>
         {hasConflict && (
-          <div className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-red-700 dark:text-red-300">
+          <div className="no-print mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-red-700 dark:text-red-300">
             <AlertTriangle className="w-3 h-3 shrink-0" />
             <span className="truncate">{conflictText}</span>
           </div>
@@ -542,28 +565,18 @@ function SlotCell({
   }
 
   return (
-    <span className="text-xs text-slate-400 dark:text-slate-600 italic select-none">
+    <span
+      className={`text-xs italic select-none ${
+        isDimmed
+          ? 'text-slate-200 dark:text-slate-800 print:text-slate-400'
+          : 'text-slate-400 dark:text-slate-600'
+      }`}
+    >
       —
     </span>
   );
 }
 
-/**
- * Props:
- *   timetable         – array of slots from the API (merged with pending edits)
- *   periods           – Mon–Sat period defs
- *   fridayPeriods     – Friday period defs
- *   periodCount
- *   fridayPeriodCount
- *   hiddenDays        – array of hidden day names
- *   isEditable
- *   onUpdateCell      – (day, period, pIdx, existingSlot, field, value) => Promise
- *   subjects          – subjects scoped strictly to the section under edit
- *   teachers          – rows from the teachers table
- *   otherSectionSlots – optional slots from other classes/sections for live clash highlighting & load
- *   conflicts         – optional precomputed conflict objects/strings
- *   maxWeeklyPeriods  – threshold above which a teacher is flagged as overloaded (default: 30)
- */
 export default function TimetableGrid({
   timetable = [],
   periods = [],
@@ -580,12 +593,14 @@ export default function TimetableGrid({
   maxWeeklyPeriods = 30,
 }) {
   const [teacherFilter, setTeacherFilter] = useState('');
-  const [showFilterDropdown, setShowFilterDropdown] = useState(false);
+  const [subjectFilter, setSubjectFilter] = useState('');
+  const [showTeacherDropdown, setShowTeacherDropdown] = useState(false);
+  const [showSubjectDropdown, setShowSubjectDropdown] = useState(false);
 
   const visibleDays = DAYS.filter((d) => !hiddenDays.includes(d));
   const headerPeriods = periods.slice(0, periodCount);
+  const activeFridayPeriods = fridayPeriods.slice(0, fridayPeriodCount);
 
-  // Section-scoped subject catalog
   const subjectCatalog = useMemo(() => {
     const map = new Map();
     for (const s of subjects) {
@@ -601,10 +616,16 @@ export default function TimetableGrid({
         });
       }
     }
+    for (const slot of [...timetable, ...otherSectionSlots]) {
+      const name = String(slot.subject_name || slot.subject || '').trim();
+      const key = normalizeText(name);
+      if (key && !map.has(key)) {
+        map.set(key, { key, id: null, name, code: '' });
+      }
+    }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [subjects]);
+  }, [subjects, timetable, otherSectionSlots]);
 
-  // Teachers catalog & subject lookup
   const { teacherCatalog, teacherSubjectMap } = useMemo(() => {
     const subjectIdToName = new Map();
     for (const s of subjects) {
@@ -645,16 +666,35 @@ export default function TimetableGrid({
       });
     }
 
+    for (const slot of [...timetable, ...otherSectionSlots]) {
+      const name = String(slot.teacher_name || slot.teacher || '').trim();
+      const key = normalizeText(name);
+      if (key && !tMap.has(key)) {
+        tMap.set(key, { key, id: null, name, subject: subjMap.get(key) || '' });
+      }
+    }
+
     return {
       teacherCatalog: Array.from(tMap.values()).sort((a, b) => a.name.localeCompare(b.name)),
       teacherSubjectMap: subjMap,
     };
   }, [teachers, subjects, timetable, otherSectionSlots]);
 
-  const filterSuggestions = useMemo(() => {
-    if (!teacherFilter.trim()) return [];
+  const teacherFilterQuery = normalizeText(teacherFilter);
+  const subjectFilterQuery = normalizeText(subjectFilter);
+
+  const teacherFilterSuggestions = useMemo(() => {
+    if (!teacherFilterQuery) return [];
     return rankTeacherMatches(teacherFilter, teacherCatalog);
-  }, [teacherFilter, teacherCatalog]);
+  }, [teacherFilter, teacherFilterQuery, teacherCatalog]);
+
+  const subjectFilterSuggestions = useMemo(() => {
+    if (!subjectFilterQuery) return [];
+    return rankSubjectMatches(subjectFilter, subjectCatalog);
+  }, [subjectFilter, subjectFilterQuery, subjectCatalog]);
+
+  const hasTeacherMatch = !teacherFilterQuery || teacherFilterSuggestions.length > 0;
+  const hasSubjectMatch = !subjectFilterQuery || subjectFilterSuggestions.length > 0;
 
   const teacherWorkload = useMemo(() => {
     const map = new Map();
@@ -696,21 +736,20 @@ export default function TimetableGrid({
       .sort((a, b) => b.totalPeriods - a.totalPeriods || a.name.localeCompare(b.name));
   }, [timetable, otherSectionSlots, maxWeeklyPeriods, teacherSubjectMap]);
 
-  const teacherTotalPeriods = useMemo(() => {
-    if (!teacherFilter) return 0;
-    return timetable.filter((t) =>
-      String(t.teacher_name || t.teacher || '')
-        .toLowerCase()
-        .includes(teacherFilter.toLowerCase())
-    ).length;
-  }, [timetable, teacherFilter]);
-
-  const matchesTeacherFilter = (slot) => {
-    if (!teacherFilter) return true;
+  const isSlotMatchingFilter = (slot) => {
+    if (!teacherFilterQuery && !subjectFilterQuery) return false;
     if (!slot) return false;
-    const name = String(slot.teacher_name || slot.teacher || '').toLowerCase();
-    return name.includes(teacherFilter.toLowerCase());
+    const tName = normalizeText(slot.teacher_name || slot.teacher || '');
+    const sName = normalizeText(slot.subject_name || slot.subject || '');
+    const okTeacher = !teacherFilterQuery || tName.includes(teacherFilterQuery);
+    const okSubject = !subjectFilterQuery || sName.includes(subjectFilterQuery);
+    return okTeacher && okSubject;
   };
+
+  const matchedTotalPeriods = useMemo(() => {
+    if (!teacherFilterQuery && !subjectFilterQuery) return 0;
+    return timetable.filter((t) => isSlotMatchingFilter(t)).length;
+  }, [timetable, teacherFilterQuery, subjectFilterQuery]);
 
   const getCellConflictText = (day, period, pIdx, slot, teacherName) => {
     const normTeacher = normalizeText(teacherName);
@@ -780,9 +819,16 @@ export default function TimetableGrid({
     return matchedStr ? 'Teacher double-booked' : '';
   };
 
+  const fridayWindowLabel = useMemo(() => {
+    const timed = activeFridayPeriods.filter((p) => p.start_time && p.end_time);
+    if (!timed.length) return '';
+    return `${fmtTime(timed[0].start_time)}–${fmtTime(timed[timed.length - 1].end_time)}`;
+  }, [activeFridayPeriods]);
+
+  const anyFilterActive = Boolean(teacherFilterQuery || subjectFilterQuery);
+
   return (
     <div className="space-y-4">
-      {/* Weekly teacher period workload summary */}
       {teacherWorkload.length > 0 && (
         <Card className="p-3 bg-slate-50 dark:bg-slate-800/50 space-y-2 no-print">
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -797,15 +843,14 @@ export default function TimetableGrid({
 
           <div className="flex flex-wrap gap-1.5">
             {teacherWorkload.map((item) => {
-              const isSelected =
-                teacherFilter.trim().toLowerCase() === item.name.toLowerCase();
+              const isSelected = teacherFilterQuery === normalizeText(item.name);
               return (
                 <button
                   key={item.key}
                   type="button"
                   onClick={() =>
                     setTeacherFilter((prev) =>
-                      prev.trim().toLowerCase() === item.name.toLowerCase() ? '' : item.name
+                      normalizeText(prev) === normalizeText(item.name) ? '' : item.name
                     )
                   }
                   title={
@@ -844,69 +889,152 @@ export default function TimetableGrid({
         </Card>
       )}
 
-      {/* Teacher filter (view mode only) */}
-      {!isEditable && (
-        <Card className="p-3 bg-slate-50 dark:bg-slate-800/50 flex flex-wrap items-center justify-between gap-3 no-print">
-          <div className="relative flex items-center gap-2">
-            <User className="w-4 h-4 text-brand-600" />
-            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Filter By Teacher Name:
-            </span>
-            <div className="relative">
-              <input
-                type="text"
-                autoComplete="off"
-                placeholder="Type first letters..."
-                value={teacherFilter}
-                onFocus={() => {
-                  if (teacherFilter.trim()) setShowFilterDropdown(true);
-                }}
-                onBlur={() => setTimeout(() => setShowFilterDropdown(false), 120)}
-                onChange={(e) => {
-                  setTeacherFilter(e.target.value);
-                  setShowFilterDropdown(Boolean(e.target.value.trim()));
-                }}
-                className="input text-xs py-1 w-56"
-              />
-              {showFilterDropdown && filterSuggestions.length > 0 && (
-                <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md shadow-lg max-h-48 overflow-y-auto">
-                  {filterSuggestions.map((match) => (
-                    <button
-                      key={match.key}
-                      type="button"
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        setTeacherFilter(match.name);
-                        setShowFilterDropdown(false);
-                      }}
-                      className="w-full px-2.5 py-1.5 text-xs flex items-center justify-between gap-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800 border-b last:border-b-0 border-slate-100 dark:border-slate-800"
-                    >
-                      <span className="font-semibold truncate">{match.name}</span>
-                      {match.subject && (
-                        <span className="text-[10px] text-slate-500 shrink-0">
-                          {match.subject}
-                        </span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
+      <Card className="p-3 bg-slate-50 dark:bg-slate-800/50 space-y-2.5 no-print">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-4">
+            {/* Teacher Filter */}
+            <div className="relative flex items-center gap-2">
+              <User className="w-4 h-4 text-brand-600 shrink-0" />
+              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Teacher:
+              </span>
+              <div className="relative flex items-center gap-1">
+                <input
+                  type="text"
+                  autoComplete="off"
+                  placeholder="Type teacher name..."
+                  value={teacherFilter}
+                  onFocus={() => {
+                    if (teacherFilter.trim()) setShowTeacherDropdown(true);
+                  }}
+                  onBlur={() => setTimeout(() => setShowTeacherDropdown(false), 120)}
+                  onChange={(e) => {
+                    setTeacherFilter(e.target.value);
+                    setShowTeacherDropdown(Boolean(e.target.value.trim()));
+                  }}
+                  className="input text-xs py-1 w-48"
+                />
+                {teacherFilter && (
+                  <button
+                    type="button"
+                    onClick={() => setTeacherFilter('')}
+                    className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded"
+                    title="Clear teacher filter"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                {showTeacherDropdown && teacherFilterSuggestions.length > 0 && (
+                  <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                    {teacherFilterSuggestions.map((match) => (
+                      <button
+                        key={match.key}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setTeacherFilter(match.name);
+                          setShowTeacherDropdown(false);
+                        }}
+                        className="w-full px-2.5 py-1.5 text-xs flex items-center justify-between gap-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800 border-b last:border-b-0 border-slate-100 dark:border-slate-800"
+                      >
+                        <span className="font-semibold truncate">{match.name}</span>
+                        {match.subject && (
+                          <span className="text-[10px] text-slate-500 shrink-0">
+                            {match.subject}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Subject Filter */}
+            <div className="relative flex items-center gap-2">
+              <BookOpen className="w-4 h-4 text-brand-600 shrink-0" />
+              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Subject:
+              </span>
+              <div className="relative flex items-center gap-1">
+                <input
+                  type="text"
+                  autoComplete="off"
+                  placeholder="Type subject name..."
+                  value={subjectFilter}
+                  onFocus={() => {
+                    if (subjectFilter.trim()) setShowSubjectDropdown(true);
+                  }}
+                  onBlur={() => setTimeout(() => setShowSubjectDropdown(false), 120)}
+                  onChange={(e) => {
+                    setSubjectFilter(e.target.value);
+                    setShowSubjectDropdown(Boolean(e.target.value.trim()));
+                  }}
+                  className="input text-xs py-1 w-48"
+                />
+                {subjectFilter && (
+                  <button
+                    type="button"
+                    onClick={() => setSubjectFilter('')}
+                    className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded"
+                    title="Clear subject filter"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                {showSubjectDropdown && subjectFilterSuggestions.length > 0 && (
+                  <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                    {subjectFilterSuggestions.map((match) => (
+                      <button
+                        key={match.key}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setSubjectFilter(match.name);
+                          setShowSubjectDropdown(false);
+                        }}
+                        className="w-full px-2.5 py-1.5 text-xs flex items-center justify-between gap-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800 border-b last:border-b-0 border-slate-100 dark:border-slate-800"
+                      >
+                        <span className="font-semibold truncate">{match.name}</span>
+                        {match.code && (
+                          <span className="text-[10px] text-slate-500 shrink-0">
+                            {match.code}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-          {teacherFilter && (
+
+          {anyFilterActive && (
             <div className="text-xs font-medium bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-300 px-3 py-1 rounded-full border border-brand-200 dark:border-brand-500/30">
-              Total Assigned Periods: <span className="font-bold">{teacherTotalPeriods}</span>
+              Matched Periods in Section:{' '}
+              <span className="font-bold">{matchedTotalPeriods}</span>
             </div>
           )}
-        </Card>
-      )}
+        </div>
 
-      {/* Table */}
-      <div className="bg-white dark:bg-slate-900 shadow rounded-lg overflow-x-auto border border-slate-200 dark:border-slate-800">
-        <table className="w-full text-left border-collapse min-w-[760px]">
+        {!hasTeacherMatch && (
+          <div className="text-xs font-semibold text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/35 border border-amber-300 dark:border-amber-700 rounded-md px-3 py-1.5">
+            Please add the teacher first.
+          </div>
+        )}
+
+        {!hasSubjectMatch && (
+          <div className="text-xs font-semibold text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/35 border border-amber-300 dark:border-amber-700 rounded-md px-3 py-1.5">
+            Please add the subject first.
+          </div>
+        )}
+      </Card>
+
+      <div className="bg-white dark:bg-slate-900 shadow rounded-lg overflow-x-auto print:overflow-visible border border-slate-200 dark:border-slate-800">
+        <table className="w-full text-left border-collapse min-w-[760px] print:min-w-0">
           <thead>
             <tr className="bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wider">
-              <th className="p-3.5 border-r border-slate-200 dark:border-slate-700 w-32">
+              <th className="p-3.5 border-r border-slate-200 dark:border-slate-700 w-36">
                 Day / Period
               </th>
               {headerPeriods.map((period, idx) => (
@@ -914,70 +1042,21 @@ export default function TimetableGrid({
                   key={idx}
                   className="p-3.5 border-r border-slate-200 dark:border-slate-700 text-center min-w-[170px]"
                 >
-                  {isEditable ? (
-                    <div className="flex flex-col gap-1">
-                      <input
-                        type="text"
-                        className="input text-xs text-center py-1 font-bold"
-                        value={period.name}
-                        onChange={(e) =>
-                          onUpdateCell?.('__period__', period, idx, null, 'name', e.target.value)
-                        }
-                        placeholder="Name"
-                      />
-                      <div className="flex gap-1">
-                        <input
-                          type="time"
-                          className="input text-[10px] text-center px-1 py-0.5"
-                          value={period.start_time || ''}
-                          onChange={(e) =>
-                            onUpdateCell?.(
-                              '__period__',
-                              period,
-                              idx,
-                              null,
-                              'start_time',
-                              e.target.value
-                            )
-                          }
-                        />
-                        <input
-                          type="time"
-                          className="input text-[10px] text-center px-1 py-0.5"
-                          value={period.end_time || ''}
-                          onChange={(e) =>
-                            onUpdateCell?.(
-                              '__period__',
-                              period,
-                              idx,
-                              null,
-                              'end_time',
-                              e.target.value
-                            )
-                          }
-                        />
-                      </div>
+                  <div className="font-bold">{period.name || `Period ${idx + 1}`}</div>
+                  {period.start_time && period.end_time && (
+                    <div className="text-[11px] font-normal text-slate-500 dark:text-slate-400 mt-0.5">
+                      {fmtTime(period.start_time)} - {fmtTime(period.end_time)}
                     </div>
-                  ) : (
-                    <>
-                      <div className="font-bold">{period.name || `Period ${idx + 1}`}</div>
-                      {period.start_time && period.end_time && (
-                        <div className="text-[11px] font-normal text-slate-500 dark:text-slate-400 mt-0.5">
-                          {fmtTime(period.start_time)} - {fmtTime(period.end_time)}
-                        </div>
-                      )}
-                    </>
                   )}
                 </th>
               ))}
             </tr>
           </thead>
+
           <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-sm">
             {visibleDays.map((day) => {
               const isFriday = day === 'Friday';
-              const activeList = isFriday
-                ? fridayPeriods.slice(0, fridayPeriodCount)
-                : headerPeriods;
+              const activeList = isFriday ? activeFridayPeriods : headerPeriods;
               const trailingCount = Math.max(0, headerPeriods.length - activeList.length);
 
               return (
@@ -985,12 +1064,19 @@ export default function TimetableGrid({
                   key={day}
                   className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors"
                 >
-                  <td className="p-3.5 font-semibold text-slate-800 dark:text-slate-200 border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60">
-                    {day}{' '}
+                  <td className="p-3.5 font-semibold text-slate-800 dark:text-slate-200 border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 align-top">
+                    <div>{day}</div>
                     {isFriday && (
-                      <span className="block text-[10px] text-brand-600 font-normal">
-                        (Special Timings)
-                      </span>
+                      <div className="mt-1 space-y-0.5">
+                        <span className="block text-[10px] font-semibold text-amber-700 dark:text-amber-300 uppercase tracking-wide">
+                          Friday Timings
+                        </span>
+                        {fridayWindowLabel && (
+                          <span className="block text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                            {fridayWindowLabel}
+                          </span>
+                        )}
+                      </div>
                     )}
                   </td>
 
@@ -1009,17 +1095,24 @@ export default function TimetableGrid({
                       );
                     }
 
-                    const slot = timetable.find(
-                      (t) =>
-                        t.day_of_week?.toLowerCase() === day.toLowerCase() &&
-                        (periodKey(t.start_time) === periodKey(period.start_time) ||
-                          t.period_index === pIdx ||
-                          t.period_name === period.name)
-                    );
+                    const slot =
+                      timetable.find(
+                        (t) =>
+                          t.day_of_week?.toLowerCase() === day.toLowerCase() &&
+                          (Number(t.period_index) === pIdx ||
+                            (periodKey(t.start_time) &&
+                              periodKey(t.start_time) === periodKey(period.start_time)))
+                      ) ||
+                      timetable.find(
+                        (t) =>
+                          t.day_of_week?.toLowerCase() === day.toLowerCase() &&
+                          t.period_name === period.name
+                      );
 
                     const currentSubject = slot?.subject_name || slot?.subject || '';
                     const currentTeacher = slot?.teacher_name || slot?.teacher || '';
-                    const visible = matchesTeacherFilter(slot);
+                    const isHighlighted = Boolean(anyFilterActive && isSlotMatchingFilter(slot));
+                    const isDimmed = Boolean(anyFilterActive && !isSlotMatchingFilter(slot));
                     const conflictText = getCellConflictText(
                       day,
                       period,
@@ -1044,7 +1137,8 @@ export default function TimetableGrid({
                           subjectCatalog={subjectCatalog}
                           teacherCatalog={teacherCatalog}
                           teacherSubjectMap={teacherSubjectMap}
-                          visible={visible}
+                          isHighlighted={isHighlighted}
+                          isDimmed={isDimmed}
                           isEditable={isEditable}
                           conflictText={conflictText}
                           onUpdateCell={onUpdateCell}

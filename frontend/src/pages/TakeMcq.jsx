@@ -166,7 +166,7 @@ export default function TakeMcq() {
     // Auto-submit (timer expiry): no prompt, always notify so the
     // guardian is not left uninformed.
     if (!auto) {
-      if (!window.confirm('Submit and SMS result to your guardian?')) return;
+      if (!window.confirm('Submit?')) return;
     }
 
     if (!auto) {
@@ -180,7 +180,7 @@ export default function TakeMcq() {
     submitRef.current = true;
     setSubmitting(true);
     try {
-      const res = await mcqApi.submitAttempt(attempt.id, answers, { sms: true });
+      const res = await mcqApi.submitAttempt(attempt.id, answers,);
       setResult(res?.data ?? res);
       try {
         if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop();

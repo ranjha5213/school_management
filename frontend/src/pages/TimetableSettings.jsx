@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { ArrowRight, Clock, Save, Sliders } from 'lucide-react';
+import { ArrowRight, Clock, Plus, RefreshCw, Save, Sliders, Trash2 } from 'lucide-react';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import Loader from '../components/Loader';
@@ -10,37 +10,54 @@ import { settingsApi } from '../api/endpoints';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-export const DEFAULT_PERIODS = Array.from({ length: 10 }, (_, i) => {
-  const start = 480 + i * 35; // 08:00 start, 35 mins each
-  return {
-    name: `Period ${i + 1}`,
-    start_time: minsToTime(start),
-    end_time: minsToTime(start + 35),
-    isBreak: false,
-  };
-});
-
-export const DEFAULT_FRIDAY_PERIODS = Array.from({ length: 7 }, (_, i) => {
-  const start = 480 + i * 35;
-  return {
-    name: `Period ${i + 1}`,
-    start_time: minsToTime(start),
-    end_time: minsToTime(start + 35),
-    isBreak: false,
-  };
-});
-
 function timeToMins(str) {
   if (!str) return 480;
-  const [h, m] = str.split(':').map(Number);
-  return h * 60 + m;
+  const [h, m] = String(str).split(':').map(Number);
+  return (Number.isFinite(h) ? h : 8) * 60 + (Number.isFinite(m) ? m : 0);
 }
 
 function minsToTime(mins) {
-  const h = String(Math.floor((mins / 60) % 24)).padStart(2, '0');
-  const m = String(mins % 60).padStart(2, '0');
+  const normalized = ((mins % 1440) + 1440) % 1440;
+  const h = String(Math.floor(normalized / 60)).padStart(2, '0');
+  const m = String(normalized % 60).padStart(2, '0');
   return `${h}:${m}`;
 }
+
+function buildSchedule(startStr, count, dur, recessAfter, recessDur) {
+  let cur = timeToMins(startStr);
+  const list = [];
+  const total = Math.max(1, Number(count) || 1);
+  const pDur = Math.max(5, Number(dur) || 35);
+  const rAfter = Number(recessAfter) || 0;
+  const rDur = Math.max(0, Number(recessDur) || 0);
+
+  let periodNum = 1;
+  for (let i = 1; i <= total; i++) {
+    const end = cur + pDur;
+    list.push({
+      name: `Period ${periodNum}`,
+      start_time: minsToTime(cur),
+      end_time: minsToTime(end),
+      isBreak: false,
+    });
+    cur = end;
+    if (rAfter > 0 && periodNum === rAfter && rDur > 0) {
+      const bEnd = cur + rDur;
+      list.push({
+        name: 'Break / Recess',
+        start_time: minsToTime(cur),
+        end_time: minsToTime(bEnd),
+        isBreak: true,
+      });
+      cur = bEnd;
+    }
+    periodNum += 1;
+  }
+  return list;
+}
+
+export const DEFAULT_PERIODS = buildSchedule('08:00', 10, 35, 4, 25);
+export const DEFAULT_FRIDAY_PERIODS = buildSchedule('08:00', 7, 35, 4, 15);
 
 export function parseJsonSetting(raw, fallback) {
   if (raw === null || raw === undefined) return fallback;
@@ -55,12 +72,265 @@ export function parseJsonSetting(raw, fallback) {
   return val ?? fallback;
 }
 
+function extractTimingMeta(arr, fallbackDur, fallbackRecessAfter, fallbackRecessDur) {
+  if (!Array.isArray(arr) || !arr.length) {
+    return {
+      periodDuration: fallbackDur,
+      recessAfter: fallbackRecessAfter,
+      recessDuration: fallbackRecessDur,
+    };
+  }
+
+  const teachingItems = arr.filter((item) => !item.isBreak);
+  const firstTeaching = teachingItems[0];
+  const periodDuration = firstTeaching
+    ? Math.max(5, timeToMins(firstTeaching.end_time) - timeToMins(firstTeaching.start_time))
+    : fallbackDur;
+
+  const breakIdx = arr.findIndex((item) => item.isBreak);
+  if (breakIdx === -1) {
+    return {
+      periodDuration,
+      recessAfter: 0,
+      recessDuration: 0,
+      teachingCount: teachingItems.length,
+    };
+  }
+
+  const teachingBeforeBreak = arr.slice(0, breakIdx).filter((item) => !item.isBreak).length;
+  const breakItem = arr[breakIdx];
+  const recessDuration = Math.max(
+    0,
+    timeToMins(breakItem.end_time) - timeToMins(breakItem.start_time)
+  );
+
+  return {
+    periodDuration,
+    recessAfter: teachingBeforeBreak,
+    recessDuration,
+    teachingCount: teachingItems.length,
+  };
+}
+
+function normalizePeriodRow(item, idx) {
+  const isBreak = Boolean(item?.isBreak);
+  return {
+    name: item?.name || (isBreak ? 'Break / Recess' : `Period ${idx + 1}`),
+    start_time: item?.start_time || '08:00',
+    end_time: item?.end_time || '08:35',
+    isBreak,
+  };
+}
+
+function IndividualPeriodEditor({
+  title,
+  accentClass,
+  icon: Icon,
+  presetConfig,
+  onPresetChange,
+  onApplyPreset,
+  rows,
+  onChangeRow,
+  onAddRow,
+  onRemoveRow,
+}) {
+  return (
+    <Card className="p-4 space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className={`text-sm font-semibold flex items-center gap-2 ${accentClass}`}>
+          <Icon className="w-4 h-4" /> {title}
+        </h2>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            icon={RefreshCw}
+            onClick={onApplyPreset}
+          >
+            Generate / Reset From Quick Timings
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            icon={Plus}
+            onClick={() => onAddRow(false)}
+          >
+            Add Period
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            icon={Plus}
+            onClick={() => onAddRow(true)}
+          >
+            Add Break
+          </Button>
+        </div>
+      </div>
+
+      {/* Quick preset generator bar */}
+      <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-3">
+        <div className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-2">
+          Quick Generator (optional — click &ldquo;Generate / Reset From Quick Timings&rdquo; to rebuild rows)
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 text-xs">
+          <div>
+            <label className="label">Start Time</label>
+            <input
+              type="time"
+              className="input"
+              value={presetConfig.startTime}
+              onChange={(e) => onPresetChange({ ...presetConfig, startTime: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="label">Teaching Periods</label>
+            <input
+              type="number"
+              min="1"
+              max="20"
+              className="input"
+              value={presetConfig.totalPeriods}
+              onChange={(e) => onPresetChange({ ...presetConfig, totalPeriods: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="label">Period Mins</label>
+            <input
+              type="number"
+              min="5"
+              max="180"
+              className="input"
+              value={presetConfig.periodDuration}
+              onChange={(e) => onPresetChange({ ...presetConfig, periodDuration: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="label">Break After Period</label>
+            <input
+              type="number"
+              min="0"
+              max="15"
+              className="input"
+              value={presetConfig.recessAfter}
+              onChange={(e) => onPresetChange({ ...presetConfig, recessAfter: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="label">Break Mins</label>
+            <input
+              type="number"
+              min="0"
+              max="120"
+              className="input"
+              value={presetConfig.recessDuration}
+              onChange={(e) => onPresetChange({ ...presetConfig, recessDuration: e.target.value })}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Individual period-by-period timing table */}
+      <div className="overflow-x-auto border border-slate-200 dark:border-slate-700 rounded-lg">
+        <table className="w-full text-left border-collapse text-xs min-w-[600px]">
+          <thead>
+            <tr className="bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200">
+              <th className="p-2.5 w-12 text-center">#</th>
+              <th className="p-2.5">Slot / Period Label</th>
+              <th className="p-2.5 w-36">Start Time</th>
+              <th className="p-2.5 w-36">End Time</th>
+              <th className="p-2.5 w-24 text-center">Break</th>
+              <th className="p-2.5 w-14 text-center">Remove</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+            {rows.map((row, idx) => (
+              <tr
+                key={idx}
+                className={
+                  row.isBreak
+                    ? 'bg-amber-50/60 dark:bg-amber-950/20'
+                    : 'hover:bg-slate-50/70 dark:hover:bg-slate-800/40'
+                }
+              >
+                <td className="p-2 text-center font-mono text-slate-500">{idx + 1}</td>
+                <td className="p-2">
+                  <input
+                    type="text"
+                    className="input text-xs py-1.5"
+                    value={row.name}
+                    onChange={(e) => onChangeRow(idx, { ...row, name: e.target.value })}
+                  />
+                </td>
+                <td className="p-2">
+                  <input
+                    type="time"
+                    className="input text-xs py-1.5 font-mono"
+                    value={row.start_time}
+                    onChange={(e) => onChangeRow(idx, { ...row, start_time: e.target.value })}
+                  />
+                </td>
+                <td className="p-2">
+                  <input
+                    type="time"
+                    className="input text-xs py-1.5 font-mono"
+                    value={row.end_time}
+                    onChange={(e) => onChangeRow(idx, { ...row, end_time: e.target.value })}
+                  />
+                </td>
+                <td className="p-2 text-center">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(row.isBreak)}
+                    onChange={(e) => {
+                      const nextBreak = e.target.checked;
+                      const defaultName = nextBreak
+                        ? 'Break / Recess'
+                        : `Period ${rows.slice(0, idx + 1).filter((r) => !r.isBreak).length || idx + 1}`;
+                      onChangeRow(idx, {
+                        ...row,
+                        isBreak: nextBreak,
+                        name:
+                          row.name === 'Break / Recess' || /^Period \d+$/i.test(row.name)
+                            ? defaultName
+                            : row.name,
+                      });
+                    }}
+                    className="rounded border-slate-300"
+                  />
+                </td>
+                <td className="p-2 text-center">
+                  <button
+                    type="button"
+                    disabled={rows.length <= 1}
+                    onClick={() => onRemoveRow(idx)}
+                    className="p-1.5 text-slate-400 hover:text-red-600 disabled:opacity-30 rounded"
+                    title="Remove row"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
 export default function TimetableSettings() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const [hiddenDays, setHiddenDays] = useState([]);
+  const [regularRows, setRegularRows] = useState(DEFAULT_PERIODS);
+  const [fridayRows, setFridayRows] = useState(DEFAULT_FRIDAY_PERIODS);
+
   const [config, setConfig] = useState({
     startTime: '08:00',
     totalPeriods: 10,
@@ -88,17 +358,36 @@ export default function TimetableSettings() {
         if (cancelled) return;
 
         const hd = parseJsonSetting(rawHidden, []);
-        const counts = parseJsonSetting(rawCounts, { regular: 10, friday: 7 });
-        const p = parseJsonSetting(rawPeriods, []);
-        const fp = parseJsonSetting(rawFri, []);
+        const counts = parseJsonSetting(rawCounts, null);
+        const p = parseJsonSetting(rawPeriods, DEFAULT_PERIODS);
+        const fp = parseJsonSetting(rawFri, DEFAULT_FRIDAY_PERIODS);
+
+        const normReg = Array.isArray(p) && p.length ? p.map(normalizePeriodRow) : DEFAULT_PERIODS;
+        const normFri =
+          Array.isArray(fp) && fp.length ? fp.map(normalizePeriodRow) : DEFAULT_FRIDAY_PERIODS;
+
+        const regMeta = extractTimingMeta(normReg, 35, 4, 25);
+        const friMeta = extractTimingMeta(normFri, 35, 4, 15);
 
         if (Array.isArray(hd)) setHiddenDays(hd);
+        setRegularRows(normReg);
+        setFridayRows(normFri);
+
         setConfig((prev) => ({
           ...prev,
-          startTime: p[0]?.start_time || prev.startTime,
-          totalPeriods: Number(counts.regular) || prev.totalPeriods,
-          fridayStartTime: fp[0]?.start_time || prev.fridayStartTime,
-          fridayTotalPeriods: Number(counts.friday) || prev.fridayTotalPeriods,
+          startTime: normReg[0]?.start_time || prev.startTime,
+          totalPeriods:
+            Number(counts?.regular) || regMeta.teachingCount || prev.totalPeriods,
+          periodDuration: regMeta.periodDuration,
+          recessAfter: regMeta.recessAfter,
+          recessDuration: regMeta.recessDuration,
+
+          fridayStartTime: normFri[0]?.start_time || prev.fridayStartTime,
+          fridayTotalPeriods:
+            Number(counts?.friday) || friMeta.teachingCount || prev.fridayTotalPeriods,
+          fridayPeriodDuration: friMeta.periodDuration,
+          fridayRecessAfter: friMeta.recessAfter,
+          fridayRecessDuration: friMeta.recessDuration,
         }));
       } finally {
         if (!cancelled) setLoading(false);
@@ -116,49 +405,91 @@ export default function TimetableSettings() {
     );
   };
 
-  const buildSchedule = (startStr, count, dur, recessAfter, recessDur) => {
-    let cur = timeToMins(startStr);
-    const list = [];
-    for (let i = 1; i <= Number(count); i++) {
-      const end = cur + Number(dur);
-      list.push({
-        name: `Period ${i}`,
-        start_time: minsToTime(cur),
-        end_time: minsToTime(end),
-        isBreak: false,
-      });
-      cur = end;
-      if (i === Number(recessAfter) && Number(recessDur) > 0) {
-        const bEnd = cur + Number(recessDur);
-        list.push({
-          name: 'Break / Recess',
-          start_time: minsToTime(cur),
-          end_time: minsToTime(bEnd),
-          isBreak: true,
-        });
-        cur = bEnd;
-      }
-    }
-    return list;
+  const handleApplyRegularPreset = () => {
+    const generated = buildSchedule(
+      config.startTime,
+      config.totalPeriods,
+      config.periodDuration,
+      config.recessAfter,
+      config.recessDuration
+    );
+    setRegularRows(generated);
+    toast.success('Monday–Saturday period rows updated from quick timings');
+  };
+
+  const handleApplyFridayPreset = () => {
+    const generated = buildSchedule(
+      config.fridayStartTime,
+      config.fridayTotalPeriods,
+      config.fridayPeriodDuration,
+      config.fridayRecessAfter,
+      config.fridayRecessDuration
+    );
+    setFridayRows(generated);
+    toast.success('Friday period rows updated from quick timings');
+  };
+
+  const handleChangeRegularRow = (idx, updated) => {
+    setRegularRows((prev) => prev.map((r, i) => (i === idx ? updated : r)));
+  };
+
+  const handleAddRegularRow = (isBreak) => {
+    setRegularRows((prev) => {
+      const last = prev[prev.length - 1];
+      const startMins = last ? timeToMins(last.end_time) : timeToMins(config.startTime);
+      const dur = isBreak
+        ? Math.max(5, Number(config.recessDuration) || 15)
+        : Math.max(5, Number(config.periodDuration) || 35);
+      const nextPeriodNum = prev.filter((r) => !r.isBreak).length + 1;
+      return [
+        ...prev,
+        {
+          name: isBreak ? 'Break / Recess' : `Period ${nextPeriodNum}`,
+          start_time: minsToTime(startMins),
+          end_time: minsToTime(startMins + dur),
+          isBreak,
+        },
+      ];
+    });
+  };
+
+  const handleRemoveRegularRow = (idx) => {
+    setRegularRows((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev));
+  };
+
+  const handleChangeFridayRow = (idx, updated) => {
+    setFridayRows((prev) => prev.map((r, i) => (i === idx ? updated : r)));
+  };
+
+  const handleAddFridayRow = (isBreak) => {
+    setFridayRows((prev) => {
+      const last = prev[prev.length - 1];
+      const startMins = last ? timeToMins(last.end_time) : timeToMins(config.fridayStartTime);
+      const dur = isBreak
+        ? Math.max(5, Number(config.fridayRecessDuration) || 15)
+        : Math.max(5, Number(config.fridayPeriodDuration) || 35);
+      const nextPeriodNum = prev.filter((r) => !r.isBreak).length + 1;
+      return [
+        ...prev,
+        {
+          name: isBreak ? 'Break / Recess' : `Period ${nextPeriodNum}`,
+          start_time: minsToTime(startMins),
+          end_time: minsToTime(startMins + dur),
+          isBreak,
+        },
+      ];
+    });
+  };
+
+  const handleRemoveFridayRow = (idx) => {
+    setFridayRows((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev));
   };
 
   const handleSave = async (goToGrid = false) => {
     setSaving(true);
     try {
-      const regular = buildSchedule(
-        config.startTime,
-        config.totalPeriods,
-        config.periodDuration,
-        config.recessAfter,
-        config.recessDuration
-      );
-      const friday = buildSchedule(
-        config.fridayStartTime,
-        config.fridayTotalPeriods,
-        config.fridayPeriodDuration,
-        config.fridayRecessAfter,
-        config.fridayRecessDuration
-      );
+      const regular = regularRows.map(normalizePeriodRow);
+      const friday = fridayRows.map(normalizePeriodRow);
 
       await Promise.all([
         settingsApi.save('default_periods', regular),
@@ -170,7 +501,7 @@ export default function TimetableSettings() {
         }),
       ]);
 
-      toast.success('Timetable timings saved!');
+      toast.success('Individual period timings saved!');
       if (goToGrid) navigate('/timetable/grid');
     } catch (e) {
       toast.error(e.message || 'Failed to save settings');
@@ -182,7 +513,7 @@ export default function TimetableSettings() {
   if (loading) return <Loader />;
 
   return (
-    <div className="space-y-4 max-w-4xl">
+    <div className="space-y-4 max-w-5xl">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-lg font-semibold">Step 1: School Timetable Settings</h1>
         <Button
@@ -195,7 +526,6 @@ export default function TimetableSettings() {
         </Button>
       </div>
 
-      {/* Visible Days */}
       <Card className="p-4 space-y-2">
         <div className="text-sm font-semibold">Active School Days</div>
         <div className="flex flex-wrap gap-2">
@@ -219,129 +549,52 @@ export default function TimetableSettings() {
         </div>
       </Card>
 
-      {/* Mon–Sat Schedule */}
-      <Card className="p-4 space-y-3">
-        <h2 className="text-sm font-semibold flex items-center gap-2 text-brand-700">
-          <Sliders className="w-4 h-4" /> Monday – Saturday Timings
-        </h2>
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
-          <div>
-            <label className="label">Start Time</label>
-            <input
-              type="time"
-              className="input"
-              value={config.startTime}
-              onChange={(e) => setConfig({ ...config, startTime: e.target.value })}
-            />
-          </div>
-          <div>
-            <label className="label">Total Periods</label>
-            <input
-              type="number"
-              min="1"
-              max="15"
-              className="input"
-              value={config.totalPeriods}
-              onChange={(e) => setConfig({ ...config, totalPeriods: e.target.value })}
-            />
-          </div>
-          <div>
-            <label className="label">Period Mins</label>
-            <input
-              type="number"
-              min="10"
-              max="120"
-              className="input"
-              value={config.periodDuration}
-              onChange={(e) => setConfig({ ...config, periodDuration: e.target.value })}
-            />
-          </div>
-          <div>
-            <label className="label">Break After Period</label>
-            <input
-              type="number"
-              min="0"
-              max="12"
-              className="input"
-              value={config.recessAfter}
-              onChange={(e) => setConfig({ ...config, recessAfter: e.target.value })}
-            />
-          </div>
-          <div>
-            <label className="label">Break Mins</label>
-            <input
-              type="number"
-              min="0"
-              max="60"
-              className="input"
-              value={config.recessDuration}
-              onChange={(e) => setConfig({ ...config, recessDuration: e.target.value })}
-            />
-          </div>
-        </div>
-      </Card>
+      <IndividualPeriodEditor
+        title="Monday – Saturday Individual Period Timings"
+        accentClass="text-brand-700"
+        icon={Sliders}
+        presetConfig={{
+          startTime: config.startTime,
+          totalPeriods: config.totalPeriods,
+          periodDuration: config.periodDuration,
+          recessAfter: config.recessAfter,
+          recessDuration: config.recessDuration,
+        }}
+        onPresetChange={(next) => setConfig((prev) => ({ ...prev, ...next }))}
+        onApplyPreset={handleApplyRegularPreset}
+        rows={regularRows}
+        onChangeRow={handleChangeRegularRow}
+        onAddRow={handleAddRegularRow}
+        onRemoveRow={handleRemoveRegularRow}
+      />
 
-      {/* Friday Schedule */}
-      <Card className="p-4 space-y-3">
-        <h2 className="text-sm font-semibold flex items-center gap-2 text-amber-700">
-          <Clock className="w-4 h-4" /> Friday Special Timings
-        </h2>
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
-          <div>
-            <label className="label">Start Time</label>
-            <input
-              type="time"
-              className="input"
-              value={config.fridayStartTime}
-              onChange={(e) => setConfig({ ...config, fridayStartTime: e.target.value })}
-            />
-          </div>
-          <div>
-            <label className="label">Total Periods</label>
-            <input
-              type="number"
-              min="1"
-              max="12"
-              className="input"
-              value={config.fridayTotalPeriods}
-              onChange={(e) => setConfig({ ...config, fridayTotalPeriods: e.target.value })}
-            />
-          </div>
-          <div>
-            <label className="label">Period Mins</label>
-            <input
-              type="number"
-              min="10"
-              max="120"
-              className="input"
-              value={config.fridayPeriodDuration}
-              onChange={(e) => setConfig({ ...config, fridayPeriodDuration: e.target.value })}
-            />
-          </div>
-          <div>
-            <label className="label">Break After Period</label>
-            <input
-              type="number"
-              min="0"
-              max="10"
-              className="input"
-              value={config.fridayRecessAfter}
-              onChange={(e) => setConfig({ ...config, fridayRecessAfter: e.target.value })}
-            />
-          </div>
-          <div>
-            <label className="label">Break Mins</label>
-            <input
-              type="number"
-              min="0"
-              max="60"
-              className="input"
-              value={config.fridayRecessDuration}
-              onChange={(e) => setConfig({ ...config, fridayRecessDuration: e.target.value })}
-            />
-          </div>
-        </div>
-      </Card>
+      <IndividualPeriodEditor
+        title="Friday Individual Period Timings"
+        accentClass="text-amber-700"
+        icon={Clock}
+        presetConfig={{
+          startTime: config.fridayStartTime,
+          totalPeriods: config.fridayTotalPeriods,
+          periodDuration: config.fridayPeriodDuration,
+          recessAfter: config.fridayRecessAfter,
+          recessDuration: config.fridayRecessDuration,
+        }}
+        onPresetChange={(next) =>
+          setConfig((prev) => ({
+            ...prev,
+            fridayStartTime: next.startTime,
+            fridayTotalPeriods: next.totalPeriods,
+            fridayPeriodDuration: next.periodDuration,
+            fridayRecessAfter: next.recessAfter,
+            fridayRecessDuration: next.recessDuration,
+          }))
+        }
+        onApplyPreset={handleApplyFridayPreset}
+        rows={fridayRows}
+        onChangeRow={handleChangeFridayRow}
+        onAddRow={handleAddFridayRow}
+        onRemoveRow={handleRemoveFridayRow}
+      />
 
       <div className="flex justify-end gap-2">
         <Button variant="secondary" icon={Save} disabled={saving} onClick={() => handleSave(false)}>

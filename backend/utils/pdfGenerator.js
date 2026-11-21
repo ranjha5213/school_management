@@ -12,7 +12,7 @@ const buildReportCard = ({ student, attendance, exams, fees, generated_at, schoo
         margins: { top: 50, bottom: 50, left: 50, right: 50 },
         info: {
           Title: `Report Card — ${student?.name || 'Student'}`,
-          Author: school.name || process.env.SCHOOL_NAME || 'School Management',
+          Author: school.name || process.env.SCHOOL_NAME || 'Jamia Hussania Anwar-ul-Quran',
         },
       });
 
@@ -28,7 +28,7 @@ const buildReportCard = ({ student, attendance, exams, fees, generated_at, schoo
 
       // ─── Header ───
       doc.fontSize(22).font('Helvetica-Bold')
-         .text(school.name || process.env.SCHOOL_NAME || 'School Management', L, 50, { width: COL, align: 'center' });
+         .text(school.name || process.env.SCHOOL_NAME || 'Jamia Hussania Anwar-ul-Quran', L, 50, { width: COL, align: 'center' });
       doc.fontSize(11).font('Helvetica')
          .fillColor('#555')
          .text(school.address || 'Student Report Card', { width: COL, align: 'center' });
@@ -199,4 +199,143 @@ const buildReportCard = ({ student, attendance, exams, fees, generated_at, schoo
     }
   });
 
-module.exports = { buildReportCard };
+/**
+ * Renders an official donation receipt PDF for a donor.
+ * Returns a Buffer.
+ */
+const buildDonationReceipt = ({ donation, school = {} }) =>
+  new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({
+        size: 'A4',
+        margins: { top: 50, bottom: 50, left: 50, right: 50 },
+        info: {
+          Title: `Donation Receipt — ${donation?.receipt_number || donation?.id || 'Receipt'}`,
+          Author: school.name || process.env.SCHOOL_NAME || 'Jamia Hussania Anwar-ul-Quran',
+        },
+      });
+
+      const chunks = [];
+      doc.on('data', (c) => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      const W = doc.page.width;
+      const L = 50;
+      const R = W - 50;
+      const COL = R - L;
+
+      // ─── Header ───
+      doc
+        .fontSize(20)
+        .font('Helvetica-Bold')
+        .fillColor('#000')
+        .text(school.name || process.env.SCHOOL_NAME || 'Jamia Hussania Anwar-ul-Quran', L, 50, {
+          width: COL,
+          align: 'center',
+        });
+
+      if (school.address) {
+        doc
+          .fontSize(10)
+          .font('Helvetica')
+          .fillColor('#555')
+          .text(school.address, { width: COL, align: 'center' });
+      }
+
+      doc.moveDown(0.4);
+      doc
+        .fontSize(13)
+        .font('Helvetica-Bold')
+        .fillColor('#1e3a8a')
+        .text('OFFICIAL DONATION RECEIPT', { width: COL, align: 'center' });
+
+      doc.moveDown(0.5);
+      doc
+        .strokeColor('#cbd5e1')
+        .lineWidth(1)
+        .moveTo(L, doc.y)
+        .lineTo(R, doc.y)
+        .stroke();
+      doc.moveDown(1);
+
+      // ─── Receipt Metadata ───
+      const metaY = doc.y;
+      doc.fontSize(10).font('Helvetica').fillColor('#333');
+      doc.text(`Receipt #: ${donation?.receipt_number || `DON-${donation?.id || '—'}`}`, L, metaY);
+      doc.text(`Date: ${donation?.entry_date || '—'}`, L + COL / 2, metaY, {
+        width: COL / 2,
+        align: 'right',
+      });
+      doc.text(`Source: ${donation?.source || 'donation'}`, L, metaY + 18);
+
+      doc.y = metaY + 42;
+
+      // ─── Donor Details Box ───
+      const boxTop = doc.y;
+      const boxH = 88;
+      doc.rect(L, boxTop, COL, boxH).fillAndStroke('#f8fafc', '#cbd5e1');
+
+      doc.fillColor('#0f172a').fontSize(11).font('Helvetica-Bold')
+         .text('Received With Thanks From', L + 12, boxTop + 10);
+
+      doc.fontSize(10).font('Helvetica').fillColor('#1e293b');
+      doc.text(`Donor Name: ${donation?.donor_name || 'Anonymous Donor'}`, L + 12, boxTop + 28);
+      doc.text(`Phone: ${donation?.donor_phone || '—'}`, L + 12, boxTop + 44);
+      doc.text(`Email / Notes: ${donation?.donor_email || donation?.description || '—'}`, L + 12, boxTop + 60);
+
+      doc.y = boxTop + boxH + 18;
+
+      // ─── Amount Summary Table ───
+      const amount = Number(donation?.income ?? donation?.amount ?? 0);
+      const tableTop = doc.y;
+      const rowH = 26;
+
+      doc.rect(L, tableTop, COL, rowH).fill('#1e293b');
+      doc.fillColor('#ffffff').fontSize(10).font('Helvetica-Bold');
+      doc.text('Description / Purpose', L + 10, tableTop + 8, { width: COL * 0.65 });
+      doc.text('Amount', L + COL * 0.65, tableTop + 8, { width: COL * 0.35 - 10, align: 'right' });
+
+      const rowY = tableTop + rowH;
+      doc.rect(L, rowY, COL, rowH).fillAndStroke('#ffffff', '#cbd5e1');
+      doc.fillColor('#0f172a').font('Helvetica').fontSize(10);
+      doc.text(
+        donation?.description || 'General School Donation',
+        L + 10,
+        rowY + 8,
+        { width: COL * 0.65 }
+      );
+      doc.font('Helvetica-Bold').text(
+        amount.toFixed(2),
+        L + COL * 0.65,
+        rowY + 8,
+        { width: COL * 0.35 - 10, align: 'right' }
+      );
+
+      doc.y = rowY + rowH + 28;
+
+      // ─── Signature Line ───
+      doc.fontSize(10).font('Helvetica').fillColor('#475569');
+      doc.text('______________________________', R - 180, doc.y, { width: 180, align: 'center' });
+      doc.text('Authorized Signatory', R - 180, doc.y + 4, { width: 180, align: 'center' });
+
+      // ─── Footer ───
+      doc
+        .fontSize(8)
+        .font('Helvetica')
+        .fillColor('#888')
+        .text(
+          `Generated ${new Date().toLocaleString()} — Thank you for supporting education.`,
+          L,
+          doc.page.height - 60,
+          { width: COL, align: 'center' }
+        );
+
+      doc.end();
+    } catch (e) {
+      reject(e);
+    }
+  });
+
+module.exports = { buildReportCard, buildDonationReceipt };
+

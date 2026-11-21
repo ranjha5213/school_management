@@ -33,7 +33,7 @@ const buildMcqSheet = ({ exam, questions, student, school = {} }) =>
 
       // ─── Header ───
       doc.fontSize(18).font('Helvetica-Bold').fillColor('#000')
-         .text(school.name || 'School Management', L, 40, { width: COL, align: 'center' });
+         .text(school.name || 'Jamia Hussania Anwar-ul-Quran', L, 40, { width: COL, align: 'center' });
       doc.fontSize(10).font('Helvetica').fillColor('#666')
          .text(school.address || '', { width: COL, align: 'center' });
       doc.moveDown(0.4);

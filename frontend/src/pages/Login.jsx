@@ -7,6 +7,8 @@ import { useSettings } from '../context/SettingsContext';
 import Input from '../components/Input';
 import PasswordInput from '../components/PasswordInput';
 import Button from '../components/Button';
+import SchoolLogo from '../components/SchoolLogo';
+
 
 export default function Login() {
   const { user, login } = useAuth();
@@ -40,10 +42,24 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-brand-50 to-slate-100 dark:from-slate-900 dark:to-slate-950 p-4">
       <form onSubmit={submit} className="w-full max-w-sm bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-4 shadow-lg">
         <div className="text-center">
-          <School className="w-10 h-10 mx-auto text-brand-600" />
-          <h1 className="text-xl font-bold mt-2">{school_name}</h1>
-          <p className="text-xs text-slate-500 mt-1">Sign in to continue</p>
-        </div>
+  <SchoolLogo
+    className="w-16 h-16 mx-auto object-contain"
+    fallbackClassName="w-10 h-10 mx-auto text-brand-600"
+  />
+  <h1
+    dir={/[\u0600-\u06FF]/.test(school_name || '') ? 'rtl' : 'ltr'}
+    lang={/[\u0600-\u06FF]/.test(school_name || '') ? 'ur' : undefined}
+    className={
+      /[\u0600-\u06FF]/.test(school_name || '')
+        ? 'text-xl font-bold mt-2 font-urdu'
+        : 'text-xl font-bold mt-2'
+    }
+  >
+    {school_name}
+  </h1>
+  <p className="text-xs text-slate-500 mt-1">Sign in to continue</p>
+</div>
+
 
         <Input label="Email" name="email" type="email" value={form.email} onChange={onChange} placeholder="you@school.local" />
         <PasswordInput label="Password" name="password" value={form.password} onChange={onChange} />

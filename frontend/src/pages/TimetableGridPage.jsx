@@ -2,23 +2,42 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { AlertTriangle, CheckCircle2, Copy, Filter, RotateCcw, Settings } from 'lucide-react';
+import {
+  AlertTriangle,
+  BookOpen,
+  CheckCircle2,
+  Copy,
+  Eye,
+  Filter,
+  RotateCcw,
+  Settings,
+  User,
+  X,
+} from 'lucide-react';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import Loader from '../components/Loader';
 import PrintHeader from '../components/PrintHeader';
 import PrintShare from '../components/PrintShare';
-import TimetableGrid, { periodKey } from '../components/TimetableGrid';
+import TimetableGrid, { fmtTime, periodKey } from '../components/TimetableGrid';
 import {
   DEFAULT_PERIODS,
   DEFAULT_FRIDAY_PERIODS,
   parseJsonSetting,
 } from './TimetableSettings';
 import api from '../api/client';
-import { classesApi, settingsApi, timetableApi } from '../api/endpoints';
+import { classesApi, settingsApi,  teachersApi, timetableApi } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 
 const OTHER_DAYS = ['Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const WEEK_DAYS = [
+  { key: 'monday', short: 'Mon' },
+  { key: 'tuesday', short: 'Tue' },
+  { key: 'wednesday', short: 'Wed' },
+  { key: 'thursday', short: 'Thu' },
+  { key: 'friday', short: 'Fri' },
+  { key: 'saturday', short: 'Sat' },
+];
 
 const asArray = (d) => {
   if (Array.isArray(d)) return d;
@@ -31,7 +50,27 @@ const asArray = (d) => {
 
 const cellKey = (day, pIdx) => `${String(day).toLowerCase()}::${Number(pIdx)}`;
 
-const normalizeTeacher = (name) => String(name || '').trim().toLowerCase();
+const normalizeText = (name) => String(name || '').trim().toLowerCase();
+const normalizeTeacher = normalizeText;
+
+function rankSuggestions(query, list) {
+  const q = normalizeText(query);
+  if (!q) return [];
+  return list
+    .map((item) => {
+      const lower = normalizeText(item.name);
+      if (!lower) return null;
+      const words = lower.split(/\s+/).filter(Boolean);
+      const fullPrefix = lower.startsWith(q);
+      const wordPrefix = !fullPrefix && words.some((w) => w.startsWith(q));
+      const sub = !fullPrefix && !wordPrefix && lower.includes(q);
+      if (!fullPrefix && !wordPrefix && !sub) return null;
+      return { ...item, rank: fullPrefix ? 0 : wordPrefix ? 1 : 2 };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name))
+    .slice(0, 6);
+}
 
 const resolveId = (
   list,
@@ -135,6 +174,215 @@ const formatConflictMessage = (teacherName, day, startTime, periodName, clash, i
   return `${teacherName} on ${day} (${timeOrPeriod}) is already booked in ${where}`;
 };
 
+function groupAssignmentsForPeriod(sectionSlots, pIdx, regPeriod, friPeriod) {
+  const groups = new Map();
+
+  for (const dayMeta of WEEK_DAYS) {
+    const isFri = dayMeta.key === 'friday';
+    const targetP = isFri && friPeriod ? friPeriod : regPeriod;
+
+    const match = sectionSlots.find((s) => {
+      const d = String(s.day_of_week || '').trim().toLowerCase();
+      if (d !== dayMeta.key) return false;
+      if (Number(s.period_index) === pIdx) return true;
+      if (targetP?.start_time && periodKey(s.start_time) === periodKey(targetP.start_time)) {
+        return true;
+      }
+      if (targetP?.name && s.period_name === targetP.name) return true;
+      return false;
+    });
+
+    if (!match) continue;
+
+    const subject = String(match.subject_name || match.subject || '—').trim();
+    const teacher = String(match.teacher_name || match.teacher || '—').trim();
+    const groupKey = `${subject.toLowerCase()}||${teacher.toLowerCase()}`;
+
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, {
+        subject,
+        teacher,
+        days: [],
+      });
+    }
+    groups.get(groupKey).days.push(dayMeta.short);
+  }
+
+  return Array.from(groups.values());
+}
+
+function FullTimetableMatrix({
+  rows,
+  periods,
+  fridayPeriods,
+  periodCount,
+  fridayPeriodCount,
+  teacherFilter,
+  subjectFilter,
+  onSelectSection,
+}) {
+  const cols = periods.slice(0, periodCount);
+  const friCols = fridayPeriods.slice(0, fridayPeriodCount);
+  const tQuery = normalizeText(teacherFilter);
+  const sQuery = normalizeText(subjectFilter);
+  const anyFilter = Boolean(tQuery || sQuery);
+
+  return (
+    <Card className="p-4 timetable-print print:p-2 print:shadow-none print:border-0 space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100">
+            Full School Timetable (All Classes & Sections)
+          </h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Periods & timings along horizontal · Classes along vertical · Subject, Teacher & Days (Mon Tue Wed Thu Fri Sat) inside each cell
+          </p>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto print:overflow-visible border border-slate-200 dark:border-slate-800 rounded-lg">
+        <table className="w-full text-left border-collapse min-w-[920px] print:min-w-0 text-xs">
+          <thead>
+            <tr className="bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200">
+              <th className="p-3 border-r border-slate-200 dark:border-slate-700 w-40 sticky left-0 print:static bg-slate-100 dark:bg-slate-800 z-10">
+                Class / Section
+              </th>
+              {cols.map((p, idx) => {
+                const friP = friCols[idx];
+                return (
+                  <th
+                    key={idx}
+                    className="p-2.5 border-r border-slate-200 dark:border-slate-700 text-center min-w-[180px] print:min-w-0"
+                  >
+                    <div className="font-bold">
+                      P{idx + 1} · {p.name || `Period ${idx + 1}`}
+                    </div>
+                    <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400 mt-0.5">
+                      Mon–Sat: {fmtTime(p.start_time)}–{fmtTime(p.end_time)}
+                    </div>
+                    {friP && !friP.isBreak && (
+                      <div className="text-[10px] font-mono text-amber-700 dark:text-amber-300 mt-0.5">
+                        Fri: {fmtTime(friP.start_time)}–{fmtTime(friP.end_time)}
+                      </div>
+                    )}
+                    {friP?.isBreak && (
+                      <div className="text-[10px] font-semibold text-amber-700 dark:text-amber-300 mt-0.5">
+                        Fri Recess ({fmtTime(friP.start_time)}–{fmtTime(friP.end_time)})
+                      </div>
+                    )}
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+
+          <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+            {rows.map((secRow) => (
+              <tr
+                key={secRow.sectionId}
+                className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40"
+              >
+                <td className="p-3 border-r border-slate-200 dark:border-slate-700 font-semibold sticky left-0 print:static bg-white dark:bg-slate-900 z-10">
+                  <button
+                    type="button"
+                    onClick={() => onSelectSection?.(secRow.classId, secRow.sectionId)}
+                    className="print:block text-left hover:text-brand-600 transition-colors"
+                  >
+                    <div className="text-slate-800 dark:text-slate-100">{secRow.className}</div>
+                    <div className="text-[11px] font-normal text-brand-600">
+                      Section {secRow.sectionName}
+                    </div>
+                  </button>
+                </td>
+
+                {cols.map((p, pIdx) => {
+                  if (p.isBreak) {
+                    return (
+                      <td
+                        key={pIdx}
+                        className="p-2 border-r border-slate-200 dark:border-slate-700 text-center align-middle bg-amber-50/70 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 font-semibold"
+                      >
+                        RECESS
+                      </td>
+                    );
+                  }
+
+                  const friP = friCols[pIdx];
+                  const entries = groupAssignmentsForPeriod(secRow.slots, pIdx, p, friP);
+
+                  if (!entries.length) {
+                    return (
+                      <td
+                        key={pIdx}
+                        className={`p-2 border-r border-slate-200 dark:border-slate-700 text-center align-middle text-slate-400 italic ${
+                          anyFilter ? 'opacity-35 print:opacity-100' : ''
+                        }`}
+                      >
+                        —
+                      </td>
+                    );
+                  }
+
+                  const hasMatch =
+                    anyFilter &&
+                    entries.some((e) => {
+                      const okT = !tQuery || normalizeText(e.teacher).includes(tQuery);
+                      const okS = !sQuery || normalizeText(e.subject).includes(sQuery);
+                      return okT && okS;
+                    });
+                  const isDimmed = Boolean(anyFilter && !hasMatch);
+
+                  return (
+                    <td
+                      key={pIdx}
+                      className={`p-2 border-r border-slate-200 dark:border-slate-700 align-top transition-opacity ${
+                        isDimmed
+                          ? 'opacity-35 print:opacity-100'
+                          : hasMatch
+                          ? 'bg-emerald-50/80 dark:bg-emerald-950/30'
+                          : ''
+                      }`}
+                    >
+                      <div className="space-y-1.5">
+                        {entries.map((entry, idx) => {
+                          const rowMatches =
+                            anyFilter &&
+                            (!tQuery || normalizeText(entry.teacher).includes(tQuery)) &&
+                            (!sQuery || normalizeText(entry.subject).includes(sQuery));
+                          return (
+                            <div
+                              key={idx}
+                              className={`rounded px-2 py-1 border leading-tight ${
+                                rowMatches
+                                  ? 'bg-emerald-100/80 dark:bg-emerald-900/40 border-emerald-400'
+                                  : 'bg-slate-50 dark:bg-slate-800/70 border-slate-200/80 dark:border-slate-700'
+                              }`}
+                            >
+                              <div className="font-semibold text-brand-800 dark:text-brand-300 truncate print:whitespace-normal">
+                                {entry.subject}
+                              </div>
+                              <div className="text-[11px] text-slate-700 dark:text-slate-200 truncate print:whitespace-normal">
+                                {entry.teacher}
+                              </div>
+                              <div className="text-[10px] font-medium text-amber-800 dark:text-amber-300 mt-0.5">
+                                {entry.days.join(' ')}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
 export default function TimetableGridPage() {
   const { sectionId: routeSectionId } = useParams();
   const [search, setSearch] = useSearchParams();
@@ -146,8 +394,19 @@ export default function TimetableGridPage() {
   const [sections, setSections] = useState([]);
   const [sectionSubjects, setSectionSubjects] = useState([]);
   const [sectionTeachers, setSectionTeachers] = useState([]);
+  const [allCatalogTeachers, setAllCatalogTeachers] = useState([]);
+  const [allCatalogSubjects, setAllCatalogSubjects] = useState([]);
+
   const [classId, setClassId] = useState(search.get('class') || '');
   const [sectionId, setSectionId] = useState(routeSectionId || search.get('section') || '');
+  const [showFullTimetable, setShowFullTimetable] = useState(search.get('view') === 'full');
+  const [fullRows, setFullRows] = useState([]);
+  const [fullLoading, setFullLoading] = useState(false);
+
+  const [fullTeacherFilter, setFullTeacherFilter] = useState('');
+  const [fullSubjectFilter, setFullSubjectFilter] = useState('');
+  const [showFullTeacherSugg, setShowFullTeacherSugg] = useState(false);
+  const [showFullSubjectSugg, setShowFullSubjectSugg] = useState(false);
 
   const [slots, setSlots] = useState([]);
   const [otherSectionSlots, setOtherSectionSlots] = useState([]);
@@ -161,7 +420,6 @@ export default function TimetableGridPage() {
   const [fridayPeriodCount, setFridayPeriodCount] = useState(DEFAULT_FRIDAY_PERIODS.length);
   const [hiddenDays, setHiddenDays] = useState([]);
 
-  // Load saved timing settings
   useEffect(() => {
     let cancelled = false;
     async function loadSettings() {
@@ -190,9 +448,16 @@ export default function TimetableGridPage() {
     };
   }, []);
 
-  // Load classes & sections
   useEffect(() => {
     classesApi.list().then((d) => setClasses(asArray(d))).catch(() => setClasses([]));
+    teachersApi
+      .list()
+      .then((d) => setAllCatalogTeachers(asArray(d)))
+      .catch(() => setAllCatalogTeachers([]));
+       api
+      .get('/subjects')
+      .then((r) => setAllCatalogSubjects(asArray(r.data)))
+      .catch(() => setAllCatalogSubjects([]));
   }, []);
 
   useEffect(() => {
@@ -207,10 +472,10 @@ export default function TimetableGridPage() {
     const next = new URLSearchParams();
     if (classId) next.set('class', classId);
     if (sectionId) next.set('section', sectionId);
+    if (showFullTimetable) next.set('view', 'full');
     setSearch(next, { replace: true });
-  }, [classId, sectionId, setSearch]);
+  }, [classId, sectionId, showFullTimetable, setSearch]);
 
-  // Load subjects strictly scoped to the section under edit, plus teachers
   useEffect(() => {
     if (!sectionId) {
       setSectionSubjects([]);
@@ -279,7 +544,113 @@ export default function TimetableGridPage() {
     loadSlots();
   }, [loadSlots]);
 
-  // Fetch slots across other sections to detect and highlight teacher double-bookings
+  const loadFullSchoolTimetable = useCallback(async () => {
+    setFullLoading(true);
+    try {
+      const allClasses = classes.length
+        ? classes
+        : asArray(await classesApi.list().catch(() => []));
+      const allSlots =
+        typeof timetableApi.list === 'function'
+          ? asArray(await timetableApi.list().catch(() => []))
+          : [];
+
+      const matrixRows = [];
+      for (const cls of allClasses) {
+        const cId = cls.id || cls.class_id;
+        if (!cId) continue;
+        const cName = cls.class_name || cls.name || `Class ${cId}`;
+        const secs = asArray(await classesApi.sections(cId).catch(() => []));
+
+        for (const sec of secs) {
+          const sId = sec.id || sec.section_id;
+          if (!sId) continue;
+          const sName = sec.section_name || sec.name || String(sId);
+
+          const secSlots = allSlots.length
+            ? allSlots.filter((sl) => String(sl.section_id ?? '') === String(sId))
+            : asArray(await timetableApi.bySection(sId).catch(() => []));
+
+          matrixRows.push({
+            classId: String(cId),
+            className: cName,
+            sectionId: String(sId),
+            sectionName: sName,
+            slots: secSlots,
+          });
+        }
+      }
+      setFullRows(matrixRows);
+    } finally {
+      setFullLoading(false);
+    }
+  }, [classes]);
+
+  useEffect(() => {
+    if (showFullTimetable) {
+      loadFullSchoolTimetable();
+    }
+  }, [showFullTimetable, loadFullSchoolTimetable]);
+
+  // Ensure full matrix data is ready before window.print() fires
+  useEffect(() => {
+    const handleBeforePrint = () => {
+      if (showFullTimetable && !fullRows.length) {
+        loadFullSchoolTimetable();
+      }
+    };
+    window.addEventListener('beforeprint', handleBeforePrint);
+    return () => window.removeEventListener('beforeprint', handleBeforePrint);
+  }, [showFullTimetable, fullRows.length, loadFullSchoolTimetable]);
+
+  const fullTeacherOptions = useMemo(() => {
+    const map = new Map();
+    for (const t of allCatalogTeachers) {
+      const name = String(t?.name || t?.teacher_name || t?.full_name || '').trim();
+      const key = normalizeText(name);
+      if (key && !map.has(key)) map.set(key, { key, name });
+    }
+    for (const r of fullRows) {
+      for (const sl of r.slots) {
+        const name = String(sl.teacher_name || sl.teacher || '').trim();
+        const key = normalizeText(name);
+        if (key && !map.has(key)) map.set(key, { key, name });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [allCatalogTeachers, fullRows]);
+
+  const fullSubjectOptions = useMemo(() => {
+    const map = new Map();
+    for (const s of allCatalogSubjects) {
+      const name = String(s?.subject_name || s?.name || s?.title || '').trim();
+      const key = normalizeText(name);
+      if (key && !map.has(key)) map.set(key, { key, name });
+    }
+    for (const r of fullRows) {
+      for (const sl of r.slots) {
+        const name = String(sl.subject_name || sl.subject || '').trim();
+        const key = normalizeText(name);
+        if (key && !map.has(key)) map.set(key, { key, name });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [allCatalogSubjects, fullRows]);
+
+  const fullTeacherSuggestions = useMemo(
+    () => rankSuggestions(fullTeacherFilter, fullTeacherOptions),
+    [fullTeacherFilter, fullTeacherOptions]
+  );
+  const fullSubjectSuggestions = useMemo(
+    () => rankSuggestions(fullSubjectFilter, fullSubjectOptions),
+    [fullSubjectFilter, fullSubjectOptions]
+  );
+
+  const hasFullTeacherMatch =
+    !normalizeText(fullTeacherFilter) || fullTeacherSuggestions.length > 0;
+  const hasFullSubjectMatch =
+    !normalizeText(fullSubjectFilter) || fullSubjectSuggestions.length > 0;
+
   const fetchOtherSectionSlots = useCallback(
     async (classList = classes) => {
       if (!sectionId) return [];
@@ -321,7 +692,6 @@ export default function TimetableGridPage() {
     [classes, sectionId]
   );
 
-  // Load other-section slots whenever sectionId changes for live highlighting
   useEffect(() => {
     if (!sectionId) {
       setOtherSectionSlots([]);
@@ -351,7 +721,7 @@ export default function TimetableGridPage() {
   const confirmDiscardPending = (nextActionLabel) => {
     if (!pendingCount) return true;
     return window.confirm(
-      `You have ${pendingCount} unsaved slot edit(s). Discard them and ${nextActionLabel}?`
+      `You have ${pendingCount} unsaved change(s). Discard them and ${nextActionLabel}?`
     );
   };
 
@@ -367,10 +737,10 @@ export default function TimetableGridPage() {
     if (nextSectionId === sectionId) return;
     if (!confirmDiscardPending('switch section')) return;
     setPendingEdits({});
+    setShowFullTimetable(false);
     setSectionId(nextSectionId);
   };
 
-  // Merge backend slots with buffered edits so the grid shows unsaved changes immediately
   const effectiveSlots = useMemo(() => {
     const editValues = Object.values(pendingEdits);
     if (!editValues.length) return slots;
@@ -408,7 +778,6 @@ export default function TimetableGridPage() {
     return merged;
   }, [slots, pendingEdits, sectionId]);
 
-  // Compute live teacher conflicts across active grid slots (same section + other sections)
   const liveConflicts = useMemo(() => {
     if (!sectionId) return [];
 
@@ -654,7 +1023,6 @@ export default function TimetableGridPage() {
     };
   };
 
-  // Buffer cell changes locally until "Submit Timetable" is clicked
   const handleUpdateCell = (day, period, pIdx, existingSlot, field, value) => {
     if (day === '__period__') return;
     if (!sectionId) {
@@ -811,79 +1179,79 @@ export default function TimetableGridPage() {
     }
   };
 
-  // Check teacher conflicts, then batch-save all buffered edits via Promise.allSettled
   const handleSubmit = async () => {
     if (!sectionId) return toast.error('Select a Class and Section first.');
     if (busy) return;
 
     const editsToSave = Object.values(pendingEdits);
+    if (!editsToSave.length) {
+      await loadSlots();
+      toast.success('Timetable submitted!');
+      return;
+    }
+
     setBusy(true);
     try {
-      if (editsToSave.length) {
-        const conflicts = await findTeacherConflicts(editsToSave);
-        if (conflicts.length) {
-          const proceed = window.confirm(
-            `Teacher conflict detected:\n\n• ${conflicts.join('\n• ')}\n\nSubmit anyway?`
-          );
-          if (!proceed) {
-            toast.error('Submission cancelled due to teacher conflict.');
-            return;
-          }
+      const conflicts = await findTeacherConflicts(editsToSave);
+      if (conflicts.length) {
+        const proceed = window.confirm(
+          `Teacher conflict detected:\n\n• ${conflicts.join('\n• ')}\n\nSubmit anyway?`
+        );
+        if (!proceed) {
+          toast.error('Submission cancelled due to teacher conflict.');
+          return;
         }
+      }
 
-        const results = await Promise.allSettled(
-          editsToSave.map((item) =>
-            saveSlot(
-              sectionId,
-              item.day,
-              item.period,
-              item.pIdx,
-              item.existingSlot,
-              item.subject_name,
-              item.teacher_name
-            )
+      const results = await Promise.allSettled(
+        editsToSave.map((item) =>
+          saveSlot(
+            sectionId,
+            item.day,
+            item.period,
+            item.pIdx,
+            item.existingSlot,
+            item.subject_name,
+            item.teacher_name
           )
-        );
+        )
+      );
 
-        const failedEntries = results
-          .map((result, idx) => ({ result, item: editsToSave[idx] }))
-          .filter(({ result }) => result.status === 'rejected');
+      const failedEntries = results
+        .map((result, idx) => ({ result, item: editsToSave[idx] }))
+        .filter(({ result }) => result.status === 'rejected');
 
-        await loadSlots();
+      await loadSlots();
 
-        if (failedEntries.length) {
-          const nextPending = {};
-          for (const { item } of failedEntries) {
-            if (!item) continue;
-            nextPending[cellKey(item.day, item.pIdx)] = item;
-          }
-          setPendingEdits(nextPending);
+      if (failedEntries.length) {
+        const nextPending = {};
+        for (const { item } of failedEntries) {
+          if (!item) continue;
+          nextPending[cellKey(item.day, item.pIdx)] = item;
         }
+        setPendingEdits(nextPending);
+      }
 
-        const { succeeded, failedCount, lines } = reportBatchFailures(
-          'handleSubmit',
-          results,
-          editsToSave
+      const { succeeded, failedCount, lines } = reportBatchFailures(
+        'handleSubmit',
+        results,
+        editsToSave
+      );
+
+      if (failedCount && succeeded) {
+        toast.error(
+          `Saved ${succeeded}, ${failedCount} failed:\n${lines.join('\n')}`,
+          { duration: 8000 }
         );
-
-        if (failedCount && succeeded) {
-          toast.error(
-            `Saved ${succeeded}, ${failedCount} failed:\n${lines.join('\n')}`,
-            { duration: 8000 }
-          );
-        } else if (failedCount) {
-          toast.error(
-            `Failed to save ${failedCount} slot(s):\n${lines.join('\n')}`,
-            { duration: 8000 }
-          );
-        } else {
-          toast.success(`Saved ${succeeded} slot update(s) and submitted timetable!`, {
-            duration: 4000,
-          });
-        }
+      } else if (failedCount) {
+        toast.error(
+          `Failed to save ${failedCount} slot(s):\n${lines.join('\n')}`,
+          { duration: 8000 }
+        );
       } else {
-        await loadSlots();
-        toast.success('Timetable submitted!', { duration: 4000 });
+        toast.success(`Saved ${succeeded} slot update(s) and submitted timetable!`, {
+          duration: 4000,
+        });
       }
     } catch (e) {
       logApiErrorDetails('handleSubmit', e, { sectionId });
@@ -893,9 +1261,11 @@ export default function TimetableGridPage() {
     }
   };
 
+  const printTitle = showFullTimetable ? 'Full School Timetable' : 'Class Timetable';
+
   return (
-    <div className="space-y-4">
-      <PrintHeader title="Class Timetable" />
+    <div className="space-y-4 print-container timetable-print">
+      <PrintHeader title={printTitle} />
 
       <div className="flex flex-wrap items-center justify-between gap-2 no-print">
         <div className="flex flex-wrap items-center gap-2">
@@ -913,7 +1283,7 @@ export default function TimetableGridPage() {
                 size="sm"
                 variant="secondary"
                 icon={Copy}
-                disabled={!sectionId || busy}
+                disabled={!sectionId || busy || showFullTimetable}
                 onClick={handleCopyMondaySlots}
               >
                 Copy Monday Slots to All Other Days
@@ -921,7 +1291,7 @@ export default function TimetableGridPage() {
               <Button
                 size="sm"
                 icon={CheckCircle2}
-                disabled={!sectionId || busy}
+                disabled={!sectionId || busy || showFullTimetable}
                 onClick={handleSubmit}
               >
                 {busy
@@ -944,6 +1314,15 @@ export default function TimetableGridPage() {
             </>
           )}
 
+          <Button
+            size="sm"
+            variant={showFullTimetable ? 'primary' : 'secondary'}
+            icon={Eye}
+            onClick={() => setShowFullTimetable((prev) => !prev)}
+          >
+            {showFullTimetable ? 'Back to Section Grid' : 'View Full Timetable'}
+          </Button>
+
           {pendingCount > 0 && (
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-300 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-700">
               <AlertTriangle className="w-3.5 h-3.5" />
@@ -951,89 +1330,232 @@ export default function TimetableGridPage() {
             </span>
           )}
         </div>
-        <PrintShare title="Class Timetable" />
+        <PrintShare title={printTitle} />
       </div>
 
-      <Card className="p-4 no-print">
-        <div className="flex items-center gap-2 mb-2 text-sm font-semibold">
-          <Filter className="w-4 h-4 text-brand-600" /> Select Class & Section
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl">
-          <div>
-            <label className="label text-xs">Class</label>
-            <select
-              className="input text-sm"
-              value={classId}
-              onChange={(e) => handleClassChange(e.target.value)}
-            >
-              <option value="">Choose class</option>
-              {classes.map((c) => {
-                const id = c.id || c.class_id;
-                return (
-                  <option key={id} value={id}>
-                    {c.class_name || c.name}
-                  </option>
-                );
-              })}
-            </select>
-          </div>
-          <div>
-            <label className="label text-xs">Section</label>
-            <select
-              className="input text-sm"
-              value={sectionId}
-              disabled={!classId}
-              onChange={(e) => handleSectionChange(e.target.value)}
-            >
-              <option value="">{classId ? 'Choose section' : 'Pick class first'}</option>
-              {sections.map((s) => {
-                const id = s.id || s.section_id;
-                return (
-                  <option key={id} value={id}>
-                    Section {s.section_name || s.name}
-                  </option>
-                );
-              })}
-            </select>
-          </div>
-        </div>
-      </Card>
+      {showFullTimetable ? (
+        <div className="space-y-3">
+          <Card className="p-3 space-y-2 no-print">
+            <div className="flex flex-wrap items-center gap-4">
+              {/* Full Timetable Teacher Filter */}
+              <div className="relative flex items-center gap-2">
+                <User className="w-4 h-4 text-brand-600 shrink-0" />
+                <span className="text-xs font-semibold">Teacher:</span>
+                <div className="relative flex items-center gap-1">
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    placeholder="Type teacher name..."
+                    value={fullTeacherFilter}
+                    onFocus={() => {
+                      if (fullTeacherFilter.trim()) setShowFullTeacherSugg(true);
+                    }}
+                    onBlur={() => setTimeout(() => setShowFullTeacherSugg(false), 120)}
+                    onChange={(e) => {
+                      setFullTeacherFilter(e.target.value);
+                      setShowFullTeacherSugg(Boolean(e.target.value.trim()));
+                    }}
+                    className="input text-xs py-1 w-48"
+                  />
+                  {fullTeacherFilter && (
+                    <button
+                      type="button"
+                      onClick={() => setFullTeacherFilter('')}
+                      className="p-1 text-slate-400 hover:text-slate-700 rounded"
+                      title="Clear teacher filter"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  {showFullTeacherSugg && fullTeacherSuggestions.length > 0 && (
+                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                      {fullTeacherSuggestions.map((opt) => (
+                        <button
+                          key={opt.key}
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setFullTeacherFilter(opt.name);
+                            setShowFullTeacherSugg(false);
+                          }}
+                          className="w-full px-2.5 py-1.5 text-xs text-left font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 border-b last:border-b-0 border-slate-100 dark:border-slate-800"
+                        >
+                          {opt.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
 
-      {liveConflicts.length > 0 && (
-        <div
-          role="alert"
-          className="no-print rounded-lg border border-red-300 bg-red-50/90 dark:bg-red-950/35 dark:border-red-500/60 p-3.5 text-xs text-red-900 dark:text-red-200 space-y-1.5"
-        >
-          <div className="flex items-center gap-2 font-semibold text-sm text-red-800 dark:text-red-300">
-            <AlertTriangle className="w-4 h-4 shrink-0 text-red-600 dark:text-red-400" />
-            <span>
-              {liveConflicts.length} Teacher Clash{liveConflicts.length > 1 ? 'es' : ''} Detected
-            </span>
-          </div>
-          <ul className="list-disc pl-6 space-y-0.5 text-red-800 dark:text-red-200">
-            {liveConflicts.map((msg, idx) => (
-              <li key={idx}>{msg}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+              {/* Full Timetable Subject Filter */}
+              <div className="relative flex items-center gap-2">
+                <BookOpen className="w-4 h-4 text-brand-600 shrink-0" />
+                <span className="text-xs font-semibold">Subject:</span>
+                <div className="relative flex items-center gap-1">
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    placeholder="Type subject name..."
+                    value={fullSubjectFilter}
+                    onFocus={() => {
+                      if (fullSubjectFilter.trim()) setShowFullSubjectSugg(true);
+                    }}
+                    onBlur={() => setTimeout(() => setShowFullSubjectSugg(false), 120)}
+                    onChange={(e) => {
+                      setFullSubjectFilter(e.target.value);
+                      setShowFullSubjectSugg(Boolean(e.target.value.trim()));
+                    }}
+                    className="input text-xs py-1 w-48"
+                  />
+                  {fullSubjectFilter && (
+                    <button
+                      type="button"
+                      onClick={() => setFullSubjectFilter('')}
+                      className="p-1 text-slate-400 hover:text-slate-700 rounded"
+                      title="Clear subject filter"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  {showFullSubjectSugg && fullSubjectSuggestions.length > 0 && (
+                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                      {fullSubjectSuggestions.map((opt) => (
+                        <button
+                          key={opt.key}
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setFullSubjectFilter(opt.name);
+                            setShowFullSubjectSugg(false);
+                          }}
+                          className="w-full px-2.5 py-1.5 text-xs text-left font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 border-b last:border-b-0 border-slate-100 dark:border-slate-800"
+                        >
+                          {opt.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
 
-      {loading ? (
-        <Loader />
+            {!hasFullTeacherMatch && (
+              <div className="text-xs font-semibold text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/35 border border-amber-300 dark:border-amber-700 rounded-md px-3 py-1.5">
+                Please add the teacher first.
+              </div>
+            )}
+
+            {!hasFullSubjectMatch && (
+              <div className="text-xs font-semibold text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/35 border border-amber-300 dark:border-amber-700 rounded-md px-3 py-1.5">
+                Please add the subject first.
+              </div>
+            )}
+          </Card>
+
+          {fullLoading ? (
+            <Loader />
+          ) : (
+            <FullTimetableMatrix
+              rows={fullRows}
+              periods={periods}
+              fridayPeriods={fridayPeriods}
+              periodCount={periodCount}
+              fridayPeriodCount={fridayPeriodCount}
+              teacherFilter={fullTeacherFilter}
+              subjectFilter={fullSubjectFilter}
+              onSelectSection={(cId, sId) => {
+                setClassId(cId);
+                setSectionId(sId);
+                setShowFullTimetable(false);
+              }}
+            />
+          )}
+        </div>
       ) : (
-        <TimetableGrid
-          timetable={effectiveSlots}
-          otherSectionSlots={otherSectionSlots}
-          subjects={sectionSubjects}
-          teachers={sectionTeachers}
-          periods={periods}
-          fridayPeriods={fridayPeriods}
-          periodCount={periodCount}
-          fridayPeriodCount={fridayPeriodCount}
-          hiddenDays={hiddenDays}
-          isEditable={isAdmin && Boolean(sectionId)}
-          onUpdateCell={handleUpdateCell}
-        />
+        <>
+          <Card className="p-4 no-print">
+            <div className="flex items-center gap-2 mb-2 text-sm font-semibold">
+              <Filter className="w-4 h-4 text-brand-600" /> Select Class & Section
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl">
+              <div>
+                <label className="label text-xs">Class</label>
+                <select
+                  className="input text-sm"
+                  value={classId}
+                  onChange={(e) => handleClassChange(e.target.value)}
+                >
+                  <option value="">Choose class</option>
+                  {classes.map((c) => {
+                    const id = c.id || c.class_id;
+                    return (
+                      <option key={id} value={id}>
+                        {c.class_name || c.name}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+              <div>
+                <label className="label text-xs">Section</label>
+                <select
+                  className="input text-sm"
+                  value={sectionId}
+                  disabled={!classId}
+                  onChange={(e) => handleSectionChange(e.target.value)}
+                >
+                  <option value="">{classId ? 'Choose section' : 'Pick class first'}</option>
+                  {sections.map((s) => {
+                    const id = s.id || s.section_id;
+                    return (
+                      <option key={id} value={id}>
+                        Section {s.section_name || s.name}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+            </div>
+          </Card>
+
+          {liveConflicts.length > 0 && (
+            <div
+              role="alert"
+              className="no-print rounded-lg border border-red-300 bg-red-50/90 dark:bg-red-950/35 dark:border-red-500/60 p-3.5 text-xs text-red-900 dark:text-red-200 space-y-1.5"
+            >
+              <div className="flex items-center gap-2 font-semibold text-sm text-red-800 dark:text-red-300">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-red-600 dark:text-red-400" />
+                <span>
+                  {liveConflicts.length} Teacher Clash{liveConflicts.length > 1 ? 'es' : ''} Detected
+                </span>
+              </div>
+              <ul className="list-disc pl-6 space-y-0.5 text-red-800 dark:text-red-200">
+                {liveConflicts.map((msg, idx) => (
+                  <li key={idx}>{msg}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {loading ? (
+            <Loader />
+          ) : (
+            <TimetableGrid
+              timetable={effectiveSlots}
+              otherSectionSlots={otherSectionSlots}
+              subjects={sectionSubjects}
+              teachers={sectionTeachers}
+              periods={periods}
+              fridayPeriods={fridayPeriods}
+              periodCount={periodCount}
+              fridayPeriodCount={fridayPeriodCount}
+              hiddenDays={hiddenDays}
+              isEditable={isAdmin && Boolean(sectionId)}
+              onUpdateCell={handleUpdateCell}
+            />
+          )}
+        </>
       )}
     </div>
   );

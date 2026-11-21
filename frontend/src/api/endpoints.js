@@ -75,10 +75,8 @@ export const attendanceApi = {
   mySummary: () => unwrap(client.get('/attendance/me/summary')),
   byDate: (date, sectionId) =>
     unwrap(client.get('/attendance/date', { params: { date, section_id: sectionId } })),
-  bulk: (records, sectionId, { sms = false } = {}) =>
-    unwrap(client.post('/attendance/bulk', { records, section_id: sectionId }, {
-      params: sms ? { sms: 1 } : undefined,
-    })),
+  bulk: (records, sectionId,options = {}) =>
+    unwrap(client.post('/attendance/bulk', { records, section_id: sectionId }, options)),
   updateRemarks: (studentId, date, remarks) =>
     unwrap(client.patch('/attendance/remarks', { student_id: studentId, date, remarks })),
   summary: (studentId) => unwrap(client.get(`/attendance/summary/${studentId}`)),
@@ -228,10 +226,8 @@ export const mcqApi = {
 
   startAttempt: (examId, access_code) =>
     unwrap(client.post(`/mcq/${examId}/attempt/start`, { access_code })),
-  submitAttempt: (attemptId, answers, { sms = false } = {}) =>
-    unwrap(client.post(`/mcq/attempts/${attemptId}/submit`, { answers }, {
-      params: sms ? { sms: 1 } : undefined,
-    })),
+  submitAttempt: (attemptId, answers, options = {}) =>
+    unwrap(client.post(`/mcq/attempts/${attemptId}/submit`, { answers }, options)),
   logProctorEvent: (attemptId, kind, payload) =>
     unwrap(client.post(`/mcq/attempts/${attemptId}/proctor`, { kind, payload })),
   uploadSnapshot: (attemptId, dataUrl) =>
@@ -249,5 +245,12 @@ export const mcqApi = {
     unwrap(client.post(`/mcq/attempts/${attemptId}/review`, p)),
   listRecordings: (attemptId) =>
     unwrap(client.get(`/mcq/attempts/${attemptId}/recordings`)),
+};
+
+export const LEDGER_ENDPOINTS = {
+  LIST: '/ledger',
+  CREATE_ENTRY: '/ledger',
+  CREATE_DONATION: '/donations',
+  RECEIPT_PDF: (id) => `/donations/${id}/receipt.pdf`,
 };
 

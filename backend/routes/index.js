@@ -1,10 +1,12 @@
 const express = require('express');
 const router = express.Router();
+const donationLedgerRoutes = require('./donationLedgerRoutes');
 
 router.use('/attendance', require('./attendance'));
 router.use('/audit',      require('./audit'));
 router.use('/classes',    require('./classes'));
 router.use('/documents',  require('./documents'));
+router.use(donationLedgerRoutes);
 router.use('/exams',      require('./exams'));
 router.use('/fees',       require('./fees'));
 router.use('/homework',   require('./homework'));
