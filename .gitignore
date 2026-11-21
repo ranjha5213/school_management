@@ -33,3 +33,7 @@ env/
 .eggs/
 build/
 dist/
+
+# junk from stray npm/eslint commands
+frontend/eslint
+frontend/school-management-frontend@*.0.0
