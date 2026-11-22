@@ -21,7 +21,6 @@ const StudentModel = {
   findByUserId: (user_id) =>
     get(`SELECT * FROM students WHERE user_id = ?`, [user_id]),
 
-  // 👇 UPDATED: Added 'sort' to the destructured parameters
   list: ({ section_id, class_id, sort } = {}) => {
     let sql = `SELECT s.*, u.name AS student_name, u.email, u.phone, sec.section_name, c.class_name
                FROM students s
@@ -33,12 +32,10 @@ const StudentModel = {
     if (section_id) { where.push('s.section_id = ?'); params.push(section_id); }
     if (class_id)   { where.push('sec.class_id = ?'); params.push(class_id); }
     if (where.length) sql += ' WHERE ' + where.join(' AND ');
-    
-    // 👇 UPDATED: Dynamic ORDER BY logic
+
     if (sort === 'name') {
       sql += ' ORDER BY u.name ASC';
     } else {
-      // Default: Sort by roll number numerically (CAST to INTEGER ensures 2 comes before 10)
       sql += ' ORDER BY CAST(s.roll_number AS INTEGER) ASC, u.name ASC';
     }
 
@@ -46,16 +43,17 @@ const StudentModel = {
   },
 
   update: async (id, patch) => {
-    // Split: users-table fields go to users; everything else on students.
     const {
       name, email, phone,          // → users
       ...studentPatch
     } = patch;
 
+    // ✅ status / is_active included so suspend/readmit work
     const STUDENT_COLS = [
       'section_id', 'roll_number', 'gender', 'dob',
       'guardian_name', 'guardian_phone',
       'name_en', 'guardian_name_en',
+      'status', 'is_active',
     ];
     const validKeys = Object.keys(studentPatch).filter((k) => STUDENT_COLS.includes(k));
 
@@ -67,8 +65,22 @@ const StudentModel = {
       userVals.push(String(name).trim());
     }
     if (email !== undefined && email !== null && String(email).trim() !== '') {
+      const trimmedEmail = String(email).trim();
+      // ✅ uniqueness check on update
+      const conflict = await get(
+        `SELECT u.id FROM users u
+         JOIN students s ON s.user_id = u.id
+         WHERE u.email = ? AND s.id != ?`,
+        [trimmedEmail, id]
+      );
+      if (conflict) {
+        const err = new Error('Email is already in use by another user');
+        err.status = 409;
+        err.code = 'EMAIL_IN_USE';
+        throw err;
+      }
       userSets.push('email = ?');
-      userVals.push(String(email).trim());
+      userVals.push(trimmedEmail);
     }
     if (phone !== undefined) {
       userSets.push('phone = ?');
@@ -90,42 +102,34 @@ const StudentModel = {
   },
 
   remove: async (id, cascade = false) => {
-    // 1. Check if student exists first
     const student = await get(`SELECT user_id FROM students WHERE id = ?`, [id]);
-    if (!student) return { changes: 0 };
+    if (!student) return { changes: 0, found: false };
 
     if (cascade) {
-      // 2. Delete child records first to satisfy Foreign Keys
-      
-      // Fees/Payments: Delete payments first (linked to invoice), then invoices
-      await run(`DELETE FROM payments WHERE invoice_id IN (SELECT id FROM invoices WHERE student_id = ?)`, [id]);
-      await run(`DELETE FROM invoices WHERE student_id = ?`, [id]);
-      
-      // Academics & Attendance
-      await run(`DELETE FROM attendance WHERE student_id = ?`, [id]);
-      await run(`DELETE FROM exam_marks WHERE student_id = ?`, [id]);
-      
-      // Homework
-      await run(`DELETE FROM homework_submissions WHERE student_id = ?`, [id]);
-      
-      // MCQ / Online Exams
-      await run(`DELETE FROM mcq_attempts WHERE student_id = ?`, [id]);
-      await run(`DELETE FROM mcq_submissions WHERE student_id = ?`, [id]);
-      
-      // Library
-      await run(`DELETE FROM book_issues WHERE student_id = ?`, [id]);
-      
-      // Parent Links
-      await run(`DELETE FROM parent_students WHERE student_id = ?`, [id]);
+      // Tolerate missing optional tables; surface any other error
+      const safeRun = async (sql, params) => {
+        try { await run(sql, params); }
+        catch (e) {
+          if (String(e.message).includes('no such table')) return;
+          throw e;
+        }
+      };
+
+      await safeRun(`DELETE FROM payments WHERE invoice_id IN (SELECT id FROM invoices WHERE student_id = ?)`, [id]);
+      await safeRun(`DELETE FROM invoices WHERE student_id = ?`, [id]);
+      await safeRun(`DELETE FROM attendance WHERE student_id = ?`, [id]);
+      await safeRun(`DELETE FROM exam_marks WHERE student_id = ?`, [id]);
+      await safeRun(`DELETE FROM homework_submissions WHERE student_id = ?`, [id]);
+      await safeRun(`DELETE FROM mcq_attempts WHERE student_id = ?`, [id]);
+      await safeRun(`DELETE FROM mcq_submissions WHERE student_id = ?`, [id]);
+      await safeRun(`DELETE FROM book_issues WHERE student_id = ?`, [id]);
+      await safeRun(`DELETE FROM parent_students WHERE student_id = ?`, [id]);
     }
 
-    // 3. Delete the student record
     const result = await run(`DELETE FROM students WHERE id = ?`, [id]);
-
-    // 4. Delete the parent user record (this is what they log in with)
     await run(`DELETE FROM users WHERE id = ?`, [student.user_id]);
 
-    return result;
+    return { ...result, found: true };
   },
 };
 

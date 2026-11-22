@@ -1,7 +1,3 @@
-PRAGMA foreign_keys = ON;
-PRAGMA journal_mode = WAL;
-
--- ─── USERS & AUTH ─────────────────────────────────────────────
 CREATE TABLE users (
     id               INTEGER      PRIMARY KEY AUTOINCREMENT,
     name             VARCHAR(100) NOT NULL,
@@ -12,27 +8,27 @@ CREATE TABLE users (
     phone            VARCHAR(20),
     avatar_url       VARCHAR(255),
     status           VARCHAR(20)  NOT NULL DEFAULT 'active'
-                     CHECK (status IN ('active','pending','unverified','rejected','suspended')),
+                     CHECK (status IN ('active','pending','rejected','suspended')),
     approved_by      INTEGER      REFERENCES users(id) ON DELETE SET NULL,
     approved_at      DATETIME,
     rejection_reason VARCHAR(255),
     created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at       DATETIME
 );
+CREATE TABLE sqlite_sequence(name,seq);
 CREATE INDEX idx_users_role   ON users(role);
 CREATE INDEX idx_users_status ON users(status);
-
 CREATE TABLE refresh_tokens (
     id          INTEGER      PRIMARY KEY AUTOINCREMENT,
     user_id     INTEGER      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token_hash  VARCHAR(255) NOT NULL UNIQUE,
+    token_hash  VARCHAR(255) NOT NULL,
     expires_at  DATETIME     NOT NULL,
     revoked_at  DATETIME,
     created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_refresh_tokens_user   ON refresh_tokens(user_id);
+CREATE INDEX idx_refresh_tokens_hash   ON refresh_tokens(token_hash);
 CREATE INDEX idx_refresh_tokens_expiry ON refresh_tokens(expires_at);
-
 CREATE TABLE allowed_emails (
     id          INTEGER      PRIMARY KEY AUTOINCREMENT,
     email       TEXT         NOT NULL UNIQUE COLLATE NOCASE,
@@ -44,7 +40,6 @@ CREATE TABLE allowed_emails (
     used_at     DATETIME,
     created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-
 CREATE TABLE invites (
     id          INTEGER      PRIMARY KEY AUTOINCREMENT,
     email       VARCHAR(150) NOT NULL COLLATE NOCASE,
@@ -59,7 +54,6 @@ CREATE TABLE invites (
 );
 CREATE INDEX idx_invites_email ON invites(email);
 CREATE INDEX idx_invites_token ON invites(token_hash);
-
 CREATE TABLE pending_registrations (
     id            INTEGER      PRIMARY KEY AUTOINCREMENT,
     name          VARCHAR(100) NOT NULL,
@@ -71,7 +65,6 @@ CREATE TABLE pending_registrations (
     expires_at    DATETIME     NOT NULL,
     created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-
 CREATE TABLE password_resets (
     id          INTEGER      PRIMARY KEY AUTOINCREMENT,
     email       VARCHAR(150) NOT NULL COLLATE NOCASE,
@@ -85,8 +78,6 @@ CREATE TABLE password_resets (
     created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_pwreset_email ON password_resets(email);
-
--- ─── ACADEMIC STRUCTURE ──────────────────────────────────────
 CREATE TABLE academic_years (
     id          INTEGER     PRIMARY KEY AUTOINCREMENT,
     year_name   VARCHAR(20) NOT NULL UNIQUE,
@@ -96,20 +87,17 @@ CREATE TABLE academic_years (
     created_at  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK (end_date > start_date)
 );
-
 CREATE TABLE departments (
     id              INTEGER      PRIMARY KEY AUTOINCREMENT,
     department_name VARCHAR(100) NOT NULL UNIQUE,
     created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-
 CREATE TABLE classes (
     id         INTEGER      PRIMARY KEY AUTOINCREMENT,
-    class_name VARCHAR(50)  NOT NULL UNIQUE,
+    class_name VARCHAR(50)  NOT NULL,
     class_code VARCHAR(20)  UNIQUE,
     created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-
 CREATE TABLE sections (
     id           INTEGER      PRIMARY KEY AUTOINCREMENT,
     class_id     INTEGER      NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
@@ -119,18 +107,14 @@ CREATE TABLE sections (
     UNIQUE (class_id, section_name)
 );
 CREATE INDEX idx_sections_class ON sections(class_id);
-
 CREATE TABLE subjects (
     id           INTEGER      PRIMARY KEY AUTOINCREMENT,
     subject_name VARCHAR(100) NOT NULL,
     subject_code VARCHAR(20)  UNIQUE,
     class_id     INTEGER      REFERENCES classes(id) ON DELETE SET NULL,
-    created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (class_id, subject_name)
+    created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_subjects_class ON subjects(class_id);
-
--- ─── PEOPLE ──────────────────────────────────────────────────
 CREATE TABLE students (
     id                INTEGER      PRIMARY KEY AUTOINCREMENT,
     user_id           INTEGER      NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
@@ -141,14 +125,13 @@ CREATE TABLE students (
     dob               DATE,
     guardian_name     VARCHAR(100),
     guardian_phone    VARCHAR(20),
-    name_en           VARCHAR(100),
-    guardian_name_en  VARCHAR(100),
     created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at        DATETIME,
+    updated_at        DATETIME, guardian_name_en VARCHAR(100), name_en VARCHAR(100), status VARCHAR(20) NOT NULL DEFAULT 'active'
+  CHECK (status IN ('active','suspended','graduated','transferred','withdrawn')), is_active INTEGER NOT NULL DEFAULT 1
+  CHECK (is_active IN (0,1)),
     UNIQUE (section_id, roll_number)
 );
 CREATE INDEX idx_students_section ON students(section_id);
-
 CREATE TABLE teachers (
     id             INTEGER      PRIMARY KEY AUTOINCREMENT,
     user_id        INTEGER      NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
@@ -159,9 +142,8 @@ CREATE TABLE teachers (
     salary_cents   INTEGER      NOT NULL DEFAULT 0 CHECK (salary_cents >= 0),
     created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at     DATETIME
-);
+, permissions TEXT DEFAULT '{}');
 CREATE INDEX idx_teachers_department ON teachers(department_id);
-
 CREATE TABLE parent_students (
     parent_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
     student_id     INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
@@ -171,54 +153,6 @@ CREATE TABLE parent_students (
     PRIMARY KEY (parent_user_id, student_id)
 );
 CREATE INDEX idx_parent_students_student ON parent_students(student_id);
-
-CREATE TRIGGER trg_teachers_user_role
-BEFORE INSERT ON teachers
-FOR EACH ROW
-WHEN (SELECT role FROM users WHERE id = NEW.user_id) <> 'teacher'
-BEGIN
-    SELECT RAISE(ABORT, 'teachers.user_id must reference a role=teacher user');
-END;
-
-CREATE TRIGGER trg_students_user_role
-BEFORE INSERT ON students
-FOR EACH ROW
-WHEN (SELECT role FROM users WHERE id = NEW.user_id) <> 'student'
-BEGIN
-    SELECT RAISE(ABORT, 'students.user_id must reference a role=student user');
-END;
-
--- ─── ATTENDANCE ──────────────────────────────────────────────
-CREATE TABLE attendance (
-    id              INTEGER      PRIMARY KEY AUTOINCREMENT,
-    student_id      INTEGER      NOT NULL REFERENCES students(id) ON DELETE CASCADE,
-    date            DATE         NOT NULL,
-    status          VARCHAR(10)  NOT NULL
-                    CHECK (status IN ('present','absent','late','excused','leave')),
-    remarks         VARCHAR(255),
-    marked_by       INTEGER      REFERENCES users(id)      ON DELETE SET NULL,
-    superseded_by   INTEGER      REFERENCES attendance(id) ON DELETE SET NULL,
-    marked_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    superseded_at   DATETIME
-);
-
-CREATE UNIQUE INDEX uq_attendance_active
-    ON attendance(student_id, date)
-    WHERE superseded_by IS NULL;
-
-CREATE INDEX idx_attendance_date      ON attendance(date);
-CREATE INDEX idx_attendance_student   ON attendance(student_id);
-CREATE INDEX idx_attendance_marked_by ON attendance(marked_by);
-
-CREATE INDEX idx_attendance_date_active
-    ON attendance(date)
-    WHERE superseded_by IS NULL;
-
-CREATE INDEX idx_attendance_student_date_active
-    ON attendance(student_id, date)
-    WHERE superseded_by IS NULL;
-
--- ─── COMMUNICATION ───────────────────────────────────────────
 CREATE TABLE notices (
     id                INTEGER      PRIMARY KEY AUTOINCREMENT,
     title             VARCHAR(255) NOT NULL,
@@ -233,7 +167,6 @@ CREATE TABLE notices (
     posted_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_notices_active ON notices(is_active, posted_at);
-
 CREATE TABLE notifications (
     id         INTEGER  PRIMARY KEY AUTOINCREMENT,
     user_id    INTEGER  NOT NULL REFERENCES users(id)   ON DELETE CASCADE,
@@ -244,7 +177,6 @@ CREATE TABLE notifications (
     UNIQUE (user_id, notice_id)
 );
 CREATE INDEX idx_notifications_user ON notifications(user_id, is_read);
-
 CREATE TABLE materials (
     id            INTEGER      PRIMARY KEY AUTOINCREMENT,
     title         TEXT         NOT NULL,
@@ -264,46 +196,15 @@ CREATE TABLE materials (
 CREATE INDEX idx_materials_kind     ON materials(kind);
 CREATE INDEX idx_materials_class    ON materials(class_id, section_id);
 CREATE INDEX idx_materials_uploader ON materials(uploaded_by);
-
--- ─── SMS LOG ─────────────────────────────────────────────────
-CREATE TABLE sms_log (
-    id           INTEGER  PRIMARY KEY AUTOINCREMENT,
-    to_phone     TEXT     NOT NULL,
-    body         TEXT     NOT NULL,
-    kind         TEXT     NOT NULL
-                 CHECK (kind IN ('attendance','mcq_result','fee_reminder','custom')),
-    student_id   INTEGER  REFERENCES students(id) ON DELETE SET NULL,
-    ref_id       INTEGER,
-    sent_on      DATE     NOT NULL DEFAULT (date('now')),
-    status       TEXT     NOT NULL DEFAULT 'queued'
-                 CHECK (status IN ('queued','sent','failed','skipped')),
-    error        TEXT,
-    attempts     INTEGER  NOT NULL DEFAULT 0,
-    sent_at      DATETIME,
-    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at   DATETIME
-);
-CREATE INDEX idx_sms_student ON sms_log(student_id);
-CREATE INDEX idx_sms_phone   ON sms_log(to_phone);
-CREATE INDEX idx_sms_status  ON sms_log(status, created_at);
-CREATE INDEX idx_sms_ref     ON sms_log(kind, ref_id);
-CREATE INDEX idx_sms_date    ON sms_log(sent_on);
-
-CREATE UNIQUE INDEX uq_sms_student_kind_day
-    ON sms_log(kind, student_id, sent_on)
-    WHERE status IN ('queued','sent') AND student_id IS NOT NULL;
-
--- ─── EXAMS (marks-based) ─────────────────────────────────────
 CREATE TABLE exam_types (
     id         INTEGER      PRIMARY KEY AUTOINCREMENT,
     type_name  VARCHAR(50)  NOT NULL UNIQUE,
     weightage  REAL         CHECK (weightage IS NULL OR (weightage >= 0 AND weightage <= 1))
 );
-
 CREATE TABLE exams (
     id               INTEGER      PRIMARY KEY AUTOINCREMENT,
     exam_name        VARCHAR(100) NOT NULL,
-    exam_type_id     INTEGER      REFERENCES exam_types(id)     ON DELETE SET NULL,
+    exam_type_id     INTEGER      REFERENCES exam_types(id)    ON DELETE SET NULL,
     academic_year_id INTEGER      REFERENCES academic_years(id) ON DELETE CASCADE,
     class_id         INTEGER      REFERENCES classes(id)        ON DELETE CASCADE,
     start_date       DATE,
@@ -316,7 +217,6 @@ CREATE TABLE exams (
     CHECK (passing_marks IS NULL OR total_marks IS NULL OR passing_marks <= total_marks)
 );
 CREATE INDEX idx_exams_class ON exams(class_id, academic_year_id);
-
 CREATE TABLE exam_marks (
     id             INTEGER      PRIMARY KEY AUTOINCREMENT,
     exam_id        INTEGER      NOT NULL REFERENCES exams(id)    ON DELETE CASCADE,
@@ -331,7 +231,6 @@ CREATE TABLE exam_marks (
     CHECK (marks_obtained <= total_marks)
 );
 CREATE INDEX idx_exam_marks_student ON exam_marks(student_id);
-
 CREATE TABLE grade_system (
     id             INTEGER      PRIMARY KEY AUTOINCREMENT,
     grade          VARCHAR(5)   NOT NULL UNIQUE,
@@ -341,8 +240,6 @@ CREATE TABLE grade_system (
     remarks        VARCHAR(50),
     CHECK (max_percentage > min_percentage)
 );
-
--- ─── TIMETABLE & HOMEWORK ────────────────────────────────────
 CREATE TABLE timetables (
     id           INTEGER      PRIMARY KEY AUTOINCREMENT,
     section_id   INTEGER      NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
@@ -362,41 +259,6 @@ CREATE INDEX idx_timetable_section ON timetables(section_id, day_of_week);
 CREATE UNIQUE INDEX uq_teacher_slot
     ON timetables(teacher_id, day_of_week, start_time)
     WHERE is_active = 1 AND teacher_id IS NOT NULL;
-
--- 🆕 NEW: Partial indexes for the timetable drill-down queries
-CREATE INDEX idx_timetable_day_active
-    ON timetables(day_of_week)
-    WHERE is_active = 1;
-
-CREATE INDEX idx_timetable_section_day_active
-    ON timetables(section_id, day_of_week, start_time)
-    WHERE is_active = 1;
-
--- 🆕 NEW: Speeds up the "Teacher Load" counter card
-CREATE INDEX idx_timetable_teacher_active
-    ON timetables(teacher_id, day_of_week)
-    WHERE is_active = 1 AND teacher_id IS NOT NULL;
-
-CREATE TRIGGER trg_timetable_subject_class_insert
-BEFORE INSERT ON timetables
-FOR EACH ROW
-WHEN (SELECT class_id FROM subjects WHERE id = NEW.subject_id) IS NOT NULL
- AND (SELECT class_id FROM subjects WHERE id = NEW.subject_id)
-     <> (SELECT class_id FROM sections WHERE id = NEW.section_id)
-BEGIN
-    SELECT RAISE(ABORT, 'timetable: subject does not belong to section class');
-END;
-
-CREATE TRIGGER trg_timetable_subject_class_update
-BEFORE UPDATE OF subject_id, section_id ON timetables
-FOR EACH ROW
-WHEN (SELECT class_id FROM subjects WHERE id = NEW.subject_id) IS NOT NULL
- AND (SELECT class_id FROM subjects WHERE id = NEW.subject_id)
-     <> (SELECT class_id FROM sections WHERE id = NEW.section_id)
-BEGIN
-    SELECT RAISE(ABORT, 'timetable: subject does not belong to section class');
-END;
-
 CREATE TABLE homework (
     id             INTEGER      PRIMARY KEY AUTOINCREMENT,
     subject_id     INTEGER      NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
@@ -410,7 +272,6 @@ CREATE TABLE homework (
     updated_at     DATETIME
 );
 CREATE INDEX idx_homework_subject ON homework(subject_id, due_date);
-
 CREATE TABLE homework_submissions (
     id              INTEGER      PRIMARY KEY AUTOINCREMENT,
     homework_id     INTEGER      NOT NULL REFERENCES homework(id) ON DELETE CASCADE,
@@ -424,8 +285,6 @@ CREATE TABLE homework_submissions (
     UNIQUE (homework_id, student_id)
 );
 CREATE INDEX idx_hwsub_student ON homework_submissions(student_id);
-
--- ─── MCQ EXAMS ───────────────────────────────────────────────
 CREATE TABLE mcq_exams (
     id                 INTEGER      PRIMARY KEY AUTOINCREMENT,
     title              VARCHAR(200) NOT NULL,
@@ -450,7 +309,6 @@ CREATE TABLE mcq_exams (
     created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_mcq_exams_schedule ON mcq_exams(schedule_state, scheduled_start_at, scheduled_end_at);
-
 CREATE TABLE mcq_questions (
     id             INTEGER      PRIMARY KEY AUTOINCREMENT,
     mcq_exam_id    INTEGER      NOT NULL REFERENCES mcq_exams(id) ON DELETE CASCADE,
@@ -463,7 +321,6 @@ CREATE TABLE mcq_questions (
     correct_option VARCHAR(1)   NOT NULL CHECK (correct_option IN ('A','B','C','D')),
     UNIQUE (mcq_exam_id, q_number)
 );
-
 CREATE TABLE mcq_submissions (
     id                  INTEGER      PRIMARY KEY AUTOINCREMENT,
     mcq_exam_id         INTEGER      NOT NULL REFERENCES mcq_exams(id) ON DELETE CASCADE,
@@ -484,7 +341,6 @@ CREATE TABLE mcq_submissions (
 CREATE INDEX idx_mcq_sub_exam    ON mcq_submissions(mcq_exam_id);
 CREATE INDEX idx_mcq_sub_student ON mcq_submissions(student_id);
 CREATE INDEX idx_mcq_sub_status  ON mcq_submissions(status);
-
 CREATE TABLE mcq_attempts (
     id                      INTEGER  PRIMARY KEY AUTOINCREMENT,
     mcq_exam_id             INTEGER  NOT NULL REFERENCES mcq_exams(id) ON DELETE CASCADE,
@@ -510,8 +366,6 @@ CREATE TABLE mcq_attempts (
 CREATE INDEX idx_attempts_exam    ON mcq_attempts(mcq_exam_id);
 CREATE INDEX idx_attempts_student ON mcq_attempts(student_id);
 CREATE INDEX idx_attempts_status  ON mcq_attempts(status);
-
--- ─── PROCTORING ──────────────────────────────────────────────
 CREATE TABLE proctoring_events (
     id          INTEGER  PRIMARY KEY AUTOINCREMENT,
     attempt_id  INTEGER  NOT NULL REFERENCES mcq_attempts(id) ON DELETE CASCADE,
@@ -521,7 +375,6 @@ CREATE TABLE proctoring_events (
 );
 CREATE INDEX idx_proctor_attempt ON proctoring_events(attempt_id);
 CREATE INDEX idx_proctor_kind    ON proctoring_events(kind);
-
 CREATE TABLE proctoring_recordings (
     id          INTEGER      PRIMARY KEY AUTOINCREMENT,
     attempt_id  INTEGER      NOT NULL REFERENCES mcq_attempts(id) ON DELETE CASCADE,
@@ -533,7 +386,6 @@ CREATE TABLE proctoring_recordings (
     UNIQUE (attempt_id, seq)
 );
 CREATE INDEX idx_proctor_rec_attempt ON proctoring_recordings(attempt_id, seq);
-
 CREATE TRIGGER trg_mcq_state_invariant
 BEFORE UPDATE OF is_published, schedule_state ON mcq_exams
 FOR EACH ROW
@@ -542,8 +394,6 @@ BEGIN
     SELECT RAISE(ABORT,
         'invariant violated: is_published=1 requires schedule_state in (scheduled,open)');
 END;
-
--- ─── LIBRARY ─────────────────────────────────────────────────
 CREATE TABLE books (
     id               INTEGER      PRIMARY KEY AUTOINCREMENT,
     title            VARCHAR(255) NOT NULL,
@@ -559,7 +409,6 @@ CREATE TABLE books (
     created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK (available_copies <= total_copies)
 );
-
 CREATE TABLE book_issues (
     id           INTEGER      PRIMARY KEY AUTOINCREMENT,
     book_id      INTEGER      NOT NULL REFERENCES books(id)    ON DELETE CASCADE,
@@ -570,14 +419,12 @@ CREATE TABLE book_issues (
     status       VARCHAR(20)  NOT NULL DEFAULT 'issued'
                  CHECK (status IN ('issued','returned','overdue','lost')),
     fine_cents   INTEGER      NOT NULL DEFAULT 0 CHECK (fine_cents >= 0),
-    created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP, fine_amount REAL DEFAULT 0,
     CHECK (due_date >= issue_date),
     CHECK (return_date IS NULL OR return_date >= issue_date)
 );
 CREATE INDEX idx_book_issues_student ON book_issues(student_id, status);
 CREATE INDEX idx_book_issues_book    ON book_issues(book_id, status);
-
--- ─── FINANCE ─────────────────────────────────────────────────
 CREATE TABLE invoices (
     id             INTEGER      PRIMARY KEY AUTOINCREMENT,
     student_id     INTEGER      NOT NULL REFERENCES students(id) ON DELETE CASCADE,
@@ -590,7 +437,6 @@ CREATE TABLE invoices (
     created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_invoices_student ON invoices(student_id, status);
-
 CREATE TABLE payments (
     id                INTEGER      PRIMARY KEY AUTOINCREMENT,
     invoice_id        INTEGER      NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
@@ -602,8 +448,6 @@ CREATE TABLE payments (
     paid_at           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_payments_invoice ON payments(invoice_id);
-
--- ─── SYSTEM ──────────────────────────────────────────────────
 CREATE TABLE approvals (
     id             INTEGER  PRIMARY KEY AUTOINCREMENT,
     resource_type  TEXT     NOT NULL,
@@ -621,7 +465,6 @@ CREATE TABLE approvals (
 );
 CREATE INDEX idx_approvals_status ON approvals(status, resource_type);
 CREATE INDEX idx_approvals_req    ON approvals(requested_by, status);
-
 CREATE TABLE audit_logs (
     id          INTEGER      PRIMARY KEY AUTOINCREMENT,
     user_id     INTEGER      REFERENCES users(id) ON DELETE SET NULL,
@@ -634,8 +477,6 @@ CREATE TABLE audit_logs (
 );
 CREATE INDEX idx_audit_user   ON audit_logs(user_id);
 CREATE INDEX idx_audit_entity ON audit_logs(entity, entity_id);
-CREATE INDEX idx_audit_ip     ON audit_logs(ip);
-
 CREATE TABLE system_settings (
     id            INTEGER      PRIMARY KEY AUTOINCREMENT,
     setting_key   VARCHAR(100) NOT NULL UNIQUE,
@@ -645,8 +486,38 @@ CREATE TABLE system_settings (
     description   VARCHAR(255),
     updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-
--- ─── updated_at TRIGGERS ─────────────────────────────────────
+CREATE TRIGGER trg_teachers_user_role
+BEFORE INSERT ON teachers
+FOR EACH ROW
+WHEN (SELECT role FROM users WHERE id = NEW.user_id) <> 'teacher'
+BEGIN
+    SELECT RAISE(ABORT, 'teachers.user_id must reference a role=teacher user');
+END;
+CREATE TRIGGER trg_students_user_role
+BEFORE INSERT ON students
+FOR EACH ROW
+WHEN (SELECT role FROM users WHERE id = NEW.user_id) <> 'student'
+BEGIN
+    SELECT RAISE(ABORT, 'students.user_id must reference a role=student user');
+END;
+CREATE TRIGGER trg_timetable_subject_class_insert
+BEFORE INSERT ON timetables
+FOR EACH ROW
+WHEN (SELECT class_id FROM subjects WHERE id = NEW.subject_id) IS NOT NULL
+ AND (SELECT class_id FROM subjects WHERE id = NEW.subject_id)
+     <> (SELECT class_id FROM sections WHERE id = NEW.section_id)
+BEGIN
+    SELECT RAISE(ABORT, 'timetable: subject does not belong to section class');
+END;
+CREATE TRIGGER trg_timetable_subject_class_update
+BEFORE UPDATE OF subject_id, section_id ON timetables
+FOR EACH ROW
+WHEN (SELECT class_id FROM subjects WHERE id = NEW.subject_id) IS NOT NULL
+ AND (SELECT class_id FROM subjects WHERE id = NEW.subject_id)
+     <> (SELECT class_id FROM sections WHERE id = NEW.section_id)
+BEGIN
+    SELECT RAISE(ABORT, 'timetable: subject does not belong to section class');
+END;
 CREATE TRIGGER trg_users_updated_at
 AFTER UPDATE ON users
 FOR EACH ROW
@@ -654,7 +525,6 @@ WHEN NEW.updated_at IS OLD.updated_at OR NEW.updated_at IS NULL
 BEGIN
     UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;
-
 CREATE TRIGGER trg_students_updated_at
 AFTER UPDATE ON students
 FOR EACH ROW
@@ -662,7 +532,6 @@ WHEN NEW.updated_at IS OLD.updated_at OR NEW.updated_at IS NULL
 BEGIN
     UPDATE students SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;
-
 CREATE TRIGGER trg_teachers_updated_at
 AFTER UPDATE ON teachers
 FOR EACH ROW
@@ -670,7 +539,6 @@ WHEN NEW.updated_at IS OLD.updated_at OR NEW.updated_at IS NULL
 BEGIN
     UPDATE teachers SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;
-
 CREATE TRIGGER trg_homework_updated_at
 AFTER UPDATE ON homework
 FOR EACH ROW
@@ -678,7 +546,6 @@ WHEN NEW.updated_at IS OLD.updated_at OR NEW.updated_at IS NULL
 BEGIN
     UPDATE homework SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;
-
 CREATE TRIGGER trg_system_settings_updated_at
 AFTER UPDATE ON system_settings
 FOR EACH ROW
@@ -686,7 +553,26 @@ WHEN NEW.updated_at IS OLD.updated_at OR NEW.updated_at IS NULL
 BEGIN
     UPDATE system_settings SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;
-
+CREATE TABLE sms_log (
+    id           INTEGER  PRIMARY KEY AUTOINCREMENT,
+    to_phone     TEXT     NOT NULL,
+    body         TEXT     NOT NULL,
+    kind         TEXT     NOT NULL
+                 CHECK (kind IN ('attendance','mcq_result','fee_reminder','custom')),
+    student_id   INTEGER  REFERENCES students(id) ON DELETE SET NULL,
+    ref_id       INTEGER,
+    status       TEXT     NOT NULL DEFAULT 'queued'
+                 CHECK (status IN ('queued','sent','failed','skipped')),
+    error        TEXT,
+    attempts     INTEGER  NOT NULL DEFAULT 0,
+    sent_at      DATETIME,
+    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+, sent_on DATE, updated_at DATETIME);
+CREATE INDEX idx_sms_student ON sms_log(student_id);
+CREATE INDEX idx_sms_phone   ON sms_log(to_phone);
+CREATE INDEX idx_sms_status  ON sms_log(status, created_at);
+CREATE INDEX idx_sms_ref     ON sms_log(kind, ref_id);
+CREATE INDEX idx_sms_date ON sms_log(sent_on);
 CREATE TRIGGER trg_sms_log_updated_at
 AFTER UPDATE ON sms_log
 FOR EACH ROW
@@ -694,3 +580,57 @@ WHEN NEW.updated_at IS OLD.updated_at OR NEW.updated_at IS NULL
 BEGIN
     UPDATE sms_log SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
 END;
+CREATE TABLE "attendance" (
+    id              INTEGER      PRIMARY KEY AUTOINCREMENT,
+    student_id      INTEGER      NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    date            DATE         NOT NULL,
+    status          VARCHAR(10)  NOT NULL
+                    CHECK (status IN ('present','absent','late','excused','leave')),
+    remarks         VARCHAR(255),
+    marked_by       INTEGER      REFERENCES users(id)      ON DELETE SET NULL,
+    superseded_by   INTEGER      REFERENCES "attendance"(id) ON DELETE SET NULL,
+    marked_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    superseded_at   DATETIME
+, period_number INTEGER DEFAULT NULL, session TEXT DEFAULT 'full_day');
+CREATE UNIQUE INDEX uq_attendance_active
+    ON attendance(student_id, date)
+    WHERE superseded_by IS NULL;
+CREATE INDEX idx_attendance_date      ON attendance(date);
+CREATE INDEX idx_attendance_student   ON attendance(student_id);
+CREATE INDEX idx_attendance_marked_by ON attendance(marked_by);
+CREATE INDEX idx_attendance_date_active
+    ON attendance(date) WHERE superseded_by IS NULL;
+CREATE INDEX idx_attendance_student_date_active
+    ON attendance(student_id, date) WHERE superseded_by IS NULL;
+CREATE UNIQUE INDEX idx_setting_key ON system_settings(setting_key);
+CREATE UNIQUE INDEX idx_attendance_unique ON attendance (student_id, date, session, period_number);
+CREATE TABLE documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title VARCHAR(200) NOT NULL,
+    file_name VARCHAR(255) NOT NULL,
+    file_path TEXT NOT NULL,
+    file_size INTEGER NOT NULL DEFAULT 0,
+    uploaded_by INTEGER,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME,
+    FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE UNIQUE INDEX uq_sms_kind_student_ref_day
+    ON sms_log(kind, student_id, COALESCE(ref_id, 0), sent_on)
+    WHERE status IN ('queued','sent') AND student_id IS NOT NULL;
+CREATE TABLE financial_ledger (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  entry_date TEXT NOT NULL DEFAULT (DATE('now')),
+  source TEXT NOT NULL DEFAULT 'donation', -- e.g. 'donation', 'fee', 'grant', 'expense'
+  description TEXT,
+  donor_name TEXT,
+  donor_phone TEXT,
+  donor_email TEXT,
+  receipt_number TEXT UNIQUE,
+  income REAL NOT NULL DEFAULT 0,
+  expenses REAL NOT NULL DEFAULT 0,
+  balance REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (DATETIME('now'))
+);
+CREATE INDEX idx_students_status ON students(status);
+CREATE INDEX idx_students_active ON students(is_active);

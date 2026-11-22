@@ -7,9 +7,17 @@ import Loader from '../components/Loader';
 import Empty from '../components/Empty';
 import ConfirmDelete from '../components/ConfirmDelete';
 import AddStudentModal from '../components/AddStudentModal';
-import PrintHeader from '../components/PrintHeader'; // 👈 ADDED
-import PrintShare from '../components/PrintShare';   // 👈 ADDED
+import PrintHeader from '../components/PrintHeader';
+import PrintShare from '../components/PrintShare';
 import { studentsApi, classesApi } from '../api/endpoints';
+
+const STATUS_OPTIONS = [
+  { value: 'active',      label: 'Active',      is_active: 1 },
+  { value: 'suspended',   label: 'Suspended',   is_active: 0 },
+  { value: 'graduated',   label: 'Graduated',   is_active: 0 },
+  { value: 'transferred', label: 'Transferred', is_active: 0 },
+  { value: 'withdrawn',   label: 'Withdrawn',   is_active: 0 },
+];
 
 export default function Students() {
   const nav = useNavigate();
@@ -17,18 +25,17 @@ export default function Students() {
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
 
-  // Sections state for Add Student modal
   const [sections, setSections] = useState([]);
   const [selectedSectionId, setSelectedSectionId] = useState('');
 
-  // Modals state
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
 
   const fetchStudents = () => {
     setLoading(true);
-    studentsApi.list()
+    studentsApi
+      .list()
       .then((d) => setRows(d || []))
       .catch((err) => toast.error(err.message || 'Failed to load students'))
       .finally(() => setLoading(false));
@@ -37,20 +44,26 @@ export default function Students() {
   useEffect(() => {
     fetchStudents();
 
-    // Fetch classes and flatten their sections for the Add Student workflow
-    classesApi.list().then(async (classList) => {
-      const allSections = [];
-      if (classList) {
-        for (const cls of classList) {
-          const secs = await classesApi.sections(cls.id).catch(() => []);
-          allSections.push(...(secs || []).map((s) => ({ ...s, className: cls.class_name, name: s.section_name })));
+    classesApi
+      .list()
+      .then(async (classList) => {
+        const allSections = [];
+        if (classList) {
+          for (const cls of classList) {
+            const secs = await classesApi.sections(cls.id).catch(() => []);
+            allSections.push(
+              ...(secs || []).map((s) => ({
+                ...s,
+                className: cls.class_name,
+                name: s.section_name,
+              }))
+            );
+          }
         }
-      }
-      setSections(allSections);
-      if (allSections.length > 0) {
-        setSelectedSectionId(allSections[0].id);
-      }
-    }).catch(() => {});
+        setSections(allSections);
+        if (allSections.length > 0) setSelectedSectionId(allSections[0].id);
+      })
+      .catch(() => {});
   }, []);
 
   const handleDelete = async () => {
@@ -70,11 +83,9 @@ export default function Students() {
     const s = editingStudent;
     try {
       const payload = {
-        // users
         name:  s.student_name || s.name || undefined,
         email: s.email        || undefined,
-        phone: s.phone        || undefined,
-        // students
+        phone: s.phone === '' ? null : (s.phone ?? undefined),
         roll_number:      s.roll_number      ?? undefined,
         gender:           s.gender           || undefined,
         dob:              s.dob              || undefined,
@@ -92,10 +103,37 @@ export default function Students() {
     }
   };
 
+  const handleStatusChange = async (student, newStatus) => {
+    if (!newStatus || newStatus === student.status) return;
+
+    const label =
+      STATUS_OPTIONS.find((o) => o.value === newStatus)?.label || newStatus;
+    if (!window.confirm(`Set ${student.student_name} to "${label}"?`)) return;
+
+    try {
+      if (newStatus === 'suspended') {
+        await studentsApi.suspend(student.id);
+      } else if (newStatus === 'active' && student.status === 'suspended') {
+        await studentsApi.readmit(student.id);
+      } else {
+        const opt = STATUS_OPTIONS.find((o) => o.value === newStatus);
+        await studentsApi.update(student.id, {
+          status: newStatus,
+          is_active: opt?.is_active ?? 0,
+        });
+      }
+      toast.success(`Status updated to ${label}`);
+      fetchStudents();
+    } catch (err) {
+      toast.error(err.message || 'Failed to update status');
+    }
+  };
+
   const filtered = q
-    ? rows.filter((r) =>
-        r.student_name?.toLowerCase().includes(q.toLowerCase()) ||
-        r.admission_number?.toLowerCase().includes(q.toLowerCase())
+    ? rows.filter(
+        (r) =>
+          r.student_name?.toLowerCase().includes(q.toLowerCase()) ||
+          r.admission_number?.toLowerCase().includes(q.toLowerCase())
       )
     : rows;
 
@@ -104,23 +142,17 @@ export default function Students() {
     return sec ? `${sec.className} - ${sec.section_name}` : 'General';
   })();
 
-
   return (
     <div className="space-y-4 animate-fade-in print-container">
-      {/* 👇 ADD PRINT HEADER HERE 👇 */}
-      <PrintHeader 
-        title="Student Directory" 
-        subtitle="All Registered Students" 
-      />
+      <PrintHeader title="Student Directory" subtitle="All Registered Students" />
 
       <Card className="p-5">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-3">
           <h3 className="font-semibold flex items-center gap-2">
             <Users className="w-4 h-4 text-brand-600" /> Students ({filtered.length})
           </h3>
-          
+
           <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
-            {/* 👇 ADD PRINT/SHARE BUTTONS HERE 👇 */}
             <PrintShare title="Student Directory" text="Here is the full student list." />
 
             <select
@@ -136,14 +168,14 @@ export default function Students() {
               ))}
             </select>
 
-            <button 
+            <button
               onClick={() => {
                 if (!selectedSectionId) {
                   toast.error('Please select a section first');
                   return;
                 }
                 setIsAddOpen(true);
-              }} 
+              }}
               className="btn btn-primary flex items-center gap-1.5 text-sm whitespace-nowrap no-print"
             >
               <UserPlus className="w-4 h-4" /> Add Student
@@ -176,6 +208,7 @@ export default function Students() {
                   <th className="text-left p-3">Admission #</th>
                   <th className="text-left p-3">Roll</th>
                   <th className="text-left p-3">Class</th>
+                  <th className="text-left p-3">Status</th>
                   <th className="text-right p-3 no-print">Actions</th>
                 </tr>
               </thead>
@@ -191,8 +224,39 @@ export default function Students() {
                     <td className="p-3 text-slate-500">{r.phone || '—'}</td>
                     <td className="p-3 font-mono text-xs">{r.admission_number}</td>
                     <td className="p-3">{r.roll_number || '—'}</td>
-                    <td className="p-3 text-slate-500">{r.class_name} · {r.section_name}</td>
-                    <td className="p-3 text-right space-x-1 no-print" onClick={(e) => e.stopPropagation()}>
+                    <td className="p-3 text-slate-500">
+                      {r.class_name} · {r.section_name}
+                    </td>
+
+                    <td className="p-3" onClick={(e) => e.stopPropagation()}>
+                      <select
+                        value={r.status || 'active'}
+                        onChange={(e) => handleStatusChange(r, e.target.value)}
+                        className={`text-xs rounded-full px-2 py-1 font-medium capitalize border-0 cursor-pointer no-print ${
+                          r.status === 'suspended'
+                            ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300'
+                            : r.status === 'graduated'
+                            ? 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300'
+                            : r.status === 'transferred' || r.status === 'withdrawn'
+                            ? 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                            : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+                        }`}
+                      >
+                        {STATUS_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="hidden print:inline text-xs capitalize">
+                        {r.status || 'active'}
+                      </span>
+                    </td>
+
+                    <td
+                      className="p-3 text-right space-x-1 no-print"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <button
                         onClick={() => setEditingStudent(r)}
                         className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-800 rounded"
@@ -216,7 +280,6 @@ export default function Students() {
         )}
       </Card>
 
-      {/* Add Student Modal */}
       {isAddOpen && selectedSectionId && (
         <AddStudentModal
           sectionId={selectedSectionId}
@@ -229,7 +292,6 @@ export default function Students() {
         />
       )}
 
-      {/* Edit Student Modal */}
       {editingStudent && (
         <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 p-4 overflow-y-auto no-print">
           <form
@@ -247,14 +309,15 @@ export default function Students() {
               </button>
             </div>
 
-            {/* ── Identity ── */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-medium mb-1">Name (English) *</label>
                 <input
                   type="text"
                   value={editingStudent.student_name || ''}
-                  onChange={(e) => setEditingStudent({ ...editingStudent, student_name: e.target.value })}
+                  onChange={(e) =>
+                    setEditingStudent({ ...editingStudent, student_name: e.target.value })
+                  }
                   className="input w-full"
                   required
                 />
@@ -264,7 +327,9 @@ export default function Students() {
                 <input
                   type="text"
                   value={editingStudent.name_en || ''}
-                  onChange={(e) => setEditingStudent({ ...editingStudent, name_en: e.target.value })}
+                  onChange={(e) =>
+                    setEditingStudent({ ...editingStudent, name_en: e.target.value })
+                  }
                   className="input w-full"
                   dir="rtl"
                   placeholder="اختیاری"
@@ -278,7 +343,9 @@ export default function Students() {
                 <input
                   type="email"
                   value={editingStudent.email || ''}
-                  onChange={(e) => setEditingStudent({ ...editingStudent, email: e.target.value })}
+                  onChange={(e) =>
+                    setEditingStudent({ ...editingStudent, email: e.target.value })
+                  }
                   className="input w-full"
                 />
               </div>
@@ -287,14 +354,15 @@ export default function Students() {
                 <input
                   type="tel"
                   value={editingStudent.phone || ''}
-                  onChange={(e) => setEditingStudent({ ...editingStudent, phone: e.target.value })}
+                  onChange={(e) =>
+                    setEditingStudent({ ...editingStudent, phone: e.target.value })
+                  }
                   className="input w-full"
                   placeholder="03XX-XXXXXXX"
                 />
               </div>
             </div>
 
-            {/* ── Academic ── */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-sm font-medium mb-1">Admission #</label>
@@ -303,7 +371,6 @@ export default function Students() {
                   value={editingStudent.admission_number || ''}
                   className="input w-full bg-slate-50 dark:bg-slate-800 text-slate-500"
                   readOnly
-                  title="Admission number is fixed"
                 />
               </div>
               <div>
@@ -311,7 +378,9 @@ export default function Students() {
                 <input
                   type="text"
                   value={editingStudent.roll_number || ''}
-                  onChange={(e) => setEditingStudent({ ...editingStudent, roll_number: e.target.value })}
+                  onChange={(e) =>
+                    setEditingStudent({ ...editingStudent, roll_number: e.target.value })
+                  }
                   className="input w-full"
                 />
               </div>
@@ -319,7 +388,9 @@ export default function Students() {
                 <label className="block text-sm font-medium mb-1">Gender</label>
                 <select
                   value={editingStudent.gender || ''}
-                  onChange={(e) => setEditingStudent({ ...editingStudent, gender: e.target.value || null })}
+                  onChange={(e) =>
+                    setEditingStudent({ ...editingStudent, gender: e.target.value || null })
+                  }
                   className="input w-full"
                 >
                   <option value="">—</option>
@@ -336,7 +407,9 @@ export default function Students() {
                 <input
                   type="date"
                   value={(editingStudent.dob || '').slice(0, 10)}
-                  onChange={(e) => setEditingStudent({ ...editingStudent, dob: e.target.value || null })}
+                  onChange={(e) =>
+                    setEditingStudent({ ...editingStudent, dob: e.target.value || null })
+                  }
                   className="input w-full"
                 />
               </div>
@@ -348,23 +421,30 @@ export default function Students() {
               </div>
             </div>
 
-            {/* ── Guardian ── */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-sm font-medium mb-1">Father / Guardian (English)</label>
+                <label className="block text-sm font-medium mb-1">
+                  Father / Guardian (English)
+                </label>
                 <input
                   type="text"
                   value={editingStudent.guardian_name_en || ''}
-                  onChange={(e) => setEditingStudent({ ...editingStudent, guardian_name_en: e.target.value })}
+                  onChange={(e) =>
+                    setEditingStudent({ ...editingStudent, guardian_name_en: e.target.value })
+                  }
                   className="input w-full"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Father / Guardian (Urdu)</label>
+                <label className="block text-sm font-medium mb-1">
+                  Father / Guardian (Urdu)
+                </label>
                 <input
                   type="text"
                   value={editingStudent.guardian_name || ''}
-                  onChange={(e) => setEditingStudent({ ...editingStudent, guardian_name: e.target.value })}
+                  onChange={(e) =>
+                    setEditingStudent({ ...editingStudent, guardian_name: e.target.value })
+                  }
                   className="input w-full"
                   dir="rtl"
                 />
@@ -375,7 +455,9 @@ export default function Students() {
               <input
                 type="tel"
                 value={editingStudent.guardian_phone || ''}
-                onChange={(e) => setEditingStudent({ ...editingStudent, guardian_phone: e.target.value })}
+                onChange={(e) =>
+                  setEditingStudent({ ...editingStudent, guardian_phone: e.target.value })
+                }
                 className="input w-full"
                 placeholder="03XX-XXXXXXX"
               />
@@ -397,7 +479,6 @@ export default function Students() {
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
       {deletingId && (
         <ConfirmDelete
           open={!!deletingId}

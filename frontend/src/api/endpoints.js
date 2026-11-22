@@ -57,6 +57,8 @@ export const studentsApi = {
   create: (p) => unwrap(client.post('/students', p)),
   update: (id, p) => unwrap(client.patch(`/students/${id}`, p)),
   remove: (id, cascade = true) => unwrap(client.delete(`/students/${id}`, { params: { cascade } })),
+  suspend: (id) => unwrap(client.patch(`/students/${id}/suspend`)),
+  readmit: (id) => unwrap(client.patch(`/students/${id}/readmit`)),
 };
 
 export const teachersApi = {

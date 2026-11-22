@@ -9,8 +9,8 @@ import Card from '../components/Card';
 import Avatar from '../components/Avatar';
 import Loader from '../components/Loader';
 import Empty from '../components/Empty';
-import PrintHeader from '../components/PrintHeader'; // 👈 ADDE
-import PrintShare from '../components/PrintShare';   // 👈 ADDED79
+import PrintHeader from '../components/PrintHeader';
+import PrintShare from '../components/PrintShare';
 import { studentsApi, attendanceApi } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 
@@ -26,54 +26,105 @@ export default function StudentDetail() {
   const nav = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [tab, setTab] = useState('attendance');
 
   useEffect(() => {
     setLoading(true);
-    studentsApi.overview(studentId).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
+    setLoadError(null);
+    studentsApi
+      .overview(studentId)
+      .then(setData)
+      .catch((err) => {
+        // Distinguish 403 (permission) from 404 (not found) — otherwise users
+        // see "Student not found" when they simply lack access.
+        const status = err?.response?.status;
+        if (status === 403) {
+          setLoadError({
+            kind: 'forbidden',
+            message: 'You do not have permission to view this student.',
+          });
+        } else if (status === 404) {
+          setLoadError({ kind: 'not-found', message: 'Student not found.' });
+        } else {
+          setLoadError({
+            kind: 'error',
+            message: err?.message || 'Failed to load student details.',
+          });
+        }
+        setData(null);
+      })
+      .finally(() => setLoading(false));
   }, [studentId]);
 
   if (loading) return <Loader />;
+
+  if (loadError) {
+    return (
+      <Card>
+        <Empty title={loadError.message} />
+      </Card>
+    );
+  }
+
   if (!data?.profile) return <Card><Empty title="Student not found" /></Card>;
 
   const { profile, attendanceSummary, fees, homework, exams } = data;
-
-  // Get the active tab label for the print header
-  const activeTabLabel = TABS.find(t => t.id === tab)?.label || 'Profile';
+  const activeTabLabel = TABS.find((t) => t.id === tab)?.label || 'Profile';
 
   return (
     <div className="space-y-4 animate-fade-in print-container">
-      {/* 👇 ADD PRINT HEADER HERE 👇 */}
-      <PrintHeader 
-        title={`${activeTabLabel} Report`} 
-        subtitle={`Student: ${profile.name} | Class: ${profile.class_name || '—'} - ${profile.section_name || '—'}`} 
+      <PrintHeader
+        title={`${activeTabLabel} Report`}
+        subtitle={`Student: ${profile.name} | Class: ${profile.class_name || '—'} - ${profile.section_name || '—'}`}
       />
 
       <div className="flex items-center justify-between no-print">
-        <button onClick={() => nav(-1)} className="text-sm text-slate-500 hover:text-slate-800 dark:text-slate-100 flex items-center gap-1">
+        <button
+          onClick={() => nav(-1)}
+          className="text-sm text-slate-500 hover:text-slate-800 dark:text-slate-100 flex items-center gap-1"
+        >
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
 
-        {/* 👇 ADD PRINT/SHARE BUTTONS HERE 👇 */}
-        <PrintShare title={`${profile.name} - ${activeTabLabel}`} text={`Student details for ${profile.name}`} />
+        <PrintShare
+          title={`${profile.name} - ${activeTabLabel}`}
+          text={`Student details for ${profile.name}`}
+        />
       </div>
 
       <Card className="p-5">
         <div className="flex items-start gap-4">
-        <div className="no-print">
-          <Avatar src={profile.avatar_url} name={profile.name} size={56} />
-         </div>
+          <div className="no-print">
+            <Avatar src={profile.avatar_url} name={profile.name} size={56} />
+          </div>
           <div className="flex-1">
-            <h2 className="text-lg font-semibold">{profile.name}</h2>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-lg font-semibold">{profile.name}</h2>
+              <StatusBadge status={profile.status} />
+            </div>
             <div className="text-sm text-slate-500 mt-1 flex flex-wrap gap-3">
-              <span className="flex items-center gap-1"><Mail className="w-3.5 h-3.5" />{profile.email}</span>
-              
+              <span className="flex items-center gap-1">
+                <Mail className="w-3.5 h-3.5" />
+                {profile.email}
+              </span>
+
               {profile.phone && (
-                <span className="flex items-center gap-1"><Phone className="w-3.5 h-3.5" />{profile.phone}</span>
+                <span className="flex items-center gap-1">
+                  <Phone className="w-3.5 h-3.5" />
+                  {profile.phone}
+                </span>
               )}
 
-              <span className="flex items-center gap-1"><Hash className="w-3.5 h-3.5" />Adm {profile.admission_number}</span>
-              <span className="flex items-center gap-1"><BookOpen className="w-3.5 h-3.5" />{profile.class_name || '—'} — {profile.section_name || '—'}</span>
+              <span className="flex items-center gap-1">
+                <Hash className="w-3.5 h-3.5" />
+                Adm {profile.admission_number}
+              </span>
+
+              <span className="flex items-center gap-1">
+                <BookOpen className="w-3.5 h-3.5" />
+                {profile.class_name || '—'} — {profile.section_name || '—'}
+              </span>
             </div>
           </div>
         </div>
@@ -81,10 +132,10 @@ export default function StudentDetail() {
         {attendanceSummary && tab === 'attendance' && (
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mt-4">
             <Stat label="Total Days" value={attendanceSummary.total_days} />
-            <Stat label="Present"    value={attendanceSummary.present_days} tone="green" />
-            <Stat label="Absent"     value={attendanceSummary.absent_days} tone="red" />
-            <Stat label="Late"       value={attendanceSummary.late_days} tone="amber" />
-            <Stat label="Rate %"     value={attendanceSummary.attendance_percentage} tone="blue" />
+            <Stat label="Present" value={attendanceSummary.present_days} tone="green" />
+            <Stat label="Absent" value={attendanceSummary.absent_days} tone="red" />
+            <Stat label="Late" value={attendanceSummary.late_days} tone="amber" />
+            <Stat label="Rate %" value={attendanceSummary.attendance_percentage} tone="blue" />
           </div>
         )}
       </Card>
@@ -95,7 +146,9 @@ export default function StudentDetail() {
             key={id}
             onClick={() => setTab(id)}
             className={`px-3 py-2 text-sm font-medium flex items-center gap-1.5 border-b-2 -mb-px transition ${
-              tab === id ? 'border-brand-500 text-brand-600' : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-100'
+              tab === id
+                ? 'border-brand-500 text-brand-600'
+                : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-100'
             }`}
           >
             <Icon className="w-3.5 h-3.5" /> {label}
@@ -103,14 +156,36 @@ export default function StudentDetail() {
         ))}
       </div>
 
-      {/* 👇 Pass user permissions down if needed, but by default the UI is hidden for print anyway */}
       {tab === 'attendance' && <AttendanceTab studentId={studentId} />}
-      {tab === 'exams'      && <ExamsTab rows={exams} />}
-      {tab === 'fees'       && <FeesTab rows={fees} />}
-      {tab === 'homework'   && <HomeworkTab rows={homework} />}
+      {tab === 'exams' && <ExamsTab rows={exams} />}
+      {tab === 'fees' && <FeesTab rows={fees} />}
+      {tab === 'homework' && <HomeworkTab rows={homework} />}
     </div>
   );
 }
+
+/* ─────────────────────────── Status badge ─────────────────────────── */
+
+function StatusBadge({ status = 'active' }) {
+  if (!status) return null;
+  const styles = {
+    active:      'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300',
+    suspended:   'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300',
+    graduated:   'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300',
+    transferred: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+    withdrawn:   'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  };
+  const cls = styles[status] || styles.active;
+  return (
+    <span
+      className={`inline-flex items-center text-xs px-2 py-0.5 rounded-full font-medium capitalize ${cls}`}
+    >
+      {status}
+    </span>
+  );
+}
+
+/* ─────────────────────────── Stat tile ─────────────────────────── */
 
 function Stat({ label, value, tone = 'slate' }) {
   const map = {
@@ -128,8 +203,13 @@ function Stat({ label, value, tone = 'slate' }) {
   );
 }
 
+/* ─────────────────────────── Attendance tab ─────────────────────────── */
+
 function AttendanceTab({ studentId }) {
   const { user } = useAuth();
+  // Only admin/teacher can edit attendance remarks — students see read-only.
+  const canEdit = user?.role === 'admin' || user?.role === 'teacher';
+
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editRow, setEditRow] = useState(null);
@@ -137,16 +217,31 @@ function AttendanceTab({ studentId }) {
 
   const load = () => {
     setLoading(true);
-    studentsApi.attendance(studentId).then((d) => setRows(d || [])).finally(() => setLoading(false));
+    studentsApi
+      .attendance(studentId)
+      .then((d) => setRows(d || []))
+      .finally(() => setLoading(false));
   };
+
   useEffect(() => {
     let cancelled = false;
-    const t = setTimeout(() => { if (!cancelled) load(); }, 150);
-    return () => { cancelled = true; clearTimeout(t); };
+    const t = setTimeout(() => {
+      if (!cancelled) load();
+    }, 150);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
   }, [studentId]);
 
-  const startEdit = (r) => { setEditRow(r); setNewRemarks(r.remarks || ''); };
-  const cancelEdit = () => { setEditRow(null); setNewRemarks(''); };
+  const startEdit = (r) => {
+    setEditRow(r);
+    setNewRemarks(r.remarks || '');
+  };
+  const cancelEdit = () => {
+    setEditRow(null);
+    setNewRemarks('');
+  };
 
   const saveRemarks = async () => {
     try {
@@ -154,11 +249,18 @@ function AttendanceTab({ studentId }) {
       toast.success('Remarks updated');
       cancelEdit();
       load();
-    } catch (e) { toast.error(e.message); }
+    } catch (e) {
+      toast.error(e.message || 'Failed to update remarks');
+    }
   };
 
   if (loading) return <Loader />;
-  if (!rows.length) return <Card><Empty title="No attendance records" /></Card>;
+  if (!rows.length)
+    return (
+      <Card>
+        <Empty title="No attendance records" />
+      </Card>
+    );
 
   return (
     <Card className="overflow-hidden">
@@ -169,7 +271,7 @@ function AttendanceTab({ studentId }) {
               <th className="text-left p-3">Date</th>
               <th className="text-left p-3">Status</th>
               <th className="text-left p-3">Remarks</th>
-              <th className="text-right p-3 no-print">Actions</th>
+              {canEdit && <th className="text-right p-3 no-print">Actions</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
@@ -184,18 +286,34 @@ function AttendanceTab({ studentId }) {
                       value={newRemarks}
                       onChange={(e) => setNewRemarks(e.target.value)}
                     />
-                  ) : (r.remarks || '—')}
-                </td>
-                <td className="p-3 text-right no-print">
-                  {editRow?.id === r.id ? (
-                    <div className="flex justify-end gap-1">
-                      <button onClick={saveRemarks} className="text-xs text-green-600 font-medium">Save</button>
-                      <button onClick={cancelEdit} className="text-xs text-slate-500">Cancel</button>
-                    </div>
                   ) : (
-                    <button onClick={() => startEdit(r)} className="text-xs text-brand-600 font-medium">Edit remarks</button>
+                    r.remarks || '—'
                   )}
                 </td>
+                {canEdit && (
+                  <td className="p-3 text-right no-print">
+                    {editRow?.id === r.id ? (
+                      <div className="flex justify-end gap-1">
+                        <button
+                          onClick={saveRemarks}
+                          className="text-xs text-green-600 font-medium"
+                        >
+                          Save
+                        </button>
+                        <button onClick={cancelEdit} className="text-xs text-slate-500">
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => startEdit(r)}
+                        className="text-xs text-brand-600 font-medium"
+                      >
+                        Edit remarks
+                      </button>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -205,8 +323,15 @@ function AttendanceTab({ studentId }) {
   );
 }
 
+/* ─────────────────────────── Exams tab ─────────────────────────── */
+
 function ExamsTab({ rows }) {
-  if (!rows?.length) return <Card><Empty title="No test reports yet" /></Card>;
+  if (!rows?.length)
+    return (
+      <Card>
+        <Empty title="No test reports yet" />
+      </Card>
+    );
   return (
     <Card className="overflow-hidden">
       <table className="w-full text-sm">
@@ -221,9 +346,14 @@ function ExamsTab({ rows }) {
         <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
           {rows.map((r) => (
             <tr key={r.id}>
-              <td className="p-3">{r.exam_name}<div className="text-xs text-slate-400">{r.type_name}</div></td>
-              <td className="p-3">{r.subject_name}</td>
-              <td className="p-3">{r.marks_obtained}/{r.total_marks}</td>
+              <td className="p-3">
+                {r.exam_name}
+                <div className="text-xs text-slate-400">{r.type_name}</div>
+              </td>
+              <td className="p-3">{r.subject_name || '—'}</td>
+              <td className="p-3">
+                {r.marks_obtained}/{r.total_marks}
+              </td>
               <td className="p-3 text-slate-500">{r.remarks || '—'}</td>
             </tr>
           ))}
@@ -233,8 +363,15 @@ function ExamsTab({ rows }) {
   );
 }
 
+/* ─────────────────────────── Fees tab ─────────────────────────── */
+
 function FeesTab({ rows }) {
-  if (!rows?.length) return <Card><Empty title="No fee records" /></Card>;
+  if (!rows?.length)
+    return (
+      <Card>
+        <Empty title="No fee records" />
+      </Card>
+    );
   return (
     <Card className="overflow-hidden">
       <table className="w-full text-sm">
@@ -261,8 +398,15 @@ function FeesTab({ rows }) {
   );
 }
 
+/* ─────────────────────────── Homework tab ─────────────────────────── */
+
 function HomeworkTab({ rows }) {
-  if (!rows?.length) return <Card><Empty title="No homework records" /></Card>;
+  if (!rows?.length)
+    return (
+      <Card>
+        <Empty title="No homework records" />
+      </Card>
+    );
   return (
     <Card className="overflow-hidden">
       <table className="w-full text-sm">
@@ -280,7 +424,13 @@ function HomeworkTab({ rows }) {
               <td className="p-3">{r.title}</td>
               <td className="p-3">{r.subject_name || '—'}</td>
               <td className="p-3 font-mono text-xs">{r.due_date}</td>
-              <td className="p-3">{r.submission_date ? '✓ Yes' : <span className="text-red-500">Pending</span>}</td>
+              <td className="p-3">
+                {r.submission_date ? (
+                  '✓ Yes'
+                ) : (
+                  <span className="text-red-500">Pending</span>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>

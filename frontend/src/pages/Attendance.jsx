@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CalendarCheck, Save, CheckCircle2, XCircle, Clock, AlertCircle,
   Users, BookOpen, Layers, Lock, CalendarOff, ArrowDownAZ, ListOrdered, RefreshCw
@@ -8,8 +8,8 @@ import Card from '../components/Card';
 import Input from '../components/Input';
 import Button from '../components/Button';
 import Empty from '../components/Empty';
-import PrintHeader from '../components/PrintHeader'; 
-import PrintShare from '../components/PrintShare';   
+import PrintHeader from '../components/PrintHeader';
+import PrintShare from '../components/PrintShare';
 import { attendanceApi, studentsApi, classesApi } from '../api/endpoints';
 import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
@@ -106,6 +106,10 @@ export default function Attendance() {
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
+  const isLoadingGridRef = useRef(false);
+  const ignoreNextSocketMarkedRef = useRef(false);
+  const lastLockToastRef = useRef({ key: '', time: 0 });
+
   const { socket } = useSocket();
 
   // 1. Fetch Settings on Load
@@ -132,13 +136,22 @@ export default function Attendance() {
     if (!socket) return;
     const onMarked = (p) => {
       if (String(p.section_id) === String(sectionId) && p.date === date) {
-        toast(`Attendance was submitted by ${p.marked_by_name || 'user'}`, { icon: '🔒' });
-        if (typeof loadGrid === 'function' && loaded) loadGrid();
+        if (ignoreNextSocketMarkedRef.current) {
+          ignoreNextSocketMarkedRef.current = false;
+          return;
+        }
+        toast(`Attendance was submitted by ${p.marked_by_name || 'user'}`, {
+          id: 'attendance-submitted-toast',
+          icon: '🔒',
+        });
+        if (loaded && !isLoadingGridRef.current) {
+          loadGrid(sortBy, { showToast: false });
+        }
       }
     };
     socket.on('attendance:marked', onMarked);
     return () => socket.off('attendance:marked', onMarked);
-  }, [socket, sectionId, date, loaded]);
+  }, [socket, sectionId, date, loaded, sortBy]);
 
   const locked = !!lock;
 
@@ -175,12 +188,13 @@ export default function Attendance() {
     return 'full_day';
   };
 
-  const loadGrid = async (overrideSort = sortBy) => {
+  const loadGrid = async (overrideSort = sortBy, { showToast = false } = {}) => {
     if (!classId || !sectionId) return toast.error('Select class and section');
     if (date !== todayISO()) return toast.error('Attendance can only be marked for today');
+    if (isLoadingGridRef.current) return;
 
+    isLoadingGridRef.current = true;
     setLoadingStudents(true);
-    setLoaded(false);
     setLock(null);
     try {
       const apiSession = getApiSession();
@@ -205,12 +219,24 @@ export default function Attendance() {
       setLoaded(true);
       setShowFilters(false); 
       
-      if (!list.length) toast('No students in this section yet');
-      else if (a?.lock) toast(`Loaded — locked by ${a.lock.marked_by_name || 'user'} at ${a.lock.marked_at}`);
-      else toast.success(`Loaded ${list.length} students`);
+      if (showToast) {
+        if (!list.length) {
+          toast('No students in this section yet', { id: 'attendance-load-toast' });
+        } else if (a?.lock) {
+          const lockMsg = `Loaded — locked by ${a.lock.marked_by_name || 'user'} at ${a.lock.marked_at}`;
+          const now = Date.now();
+          if (lastLockToastRef.current.key !== lockMsg || now - lastLockToastRef.current.time > 3000) {
+            lastLockToastRef.current = { key: lockMsg, time: now };
+            toast(lockMsg, { id: 'attendance-lock-toast' });
+          }
+        } else {
+          toast.success(`Loaded ${list.length} students`, { id: 'attendance-load-toast' });
+        }
+      }
     } catch (e) {
       toast.error(e.message);
     } finally {
+      isLoadingGridRef.current = false;
       setLoadingStudents(false);
     }
   };
@@ -219,7 +245,7 @@ export default function Attendance() {
     const newSort = sortBy === 'roll' ? 'name' : 'roll';
     setSortBy(newSort);
     if (loaded) {
-      loadGrid(newSort); 
+      loadGrid(newSort, { showToast: false });
     }
   };
 
@@ -243,6 +269,7 @@ export default function Attendance() {
     if (missing.length) return toast.error(`${missing.length} student(s) unmarked`);
 
     setSaving(true);
+    ignoreNextSocketMarkedRef.current = true;
     try {
       const apiSession = getApiSession();
       const payload = students.map((s) => ({
@@ -252,10 +279,10 @@ export default function Attendance() {
       }));
 
       await attendanceApi.bulk(payload, sectionId, { session: apiSession });
-       toast.success('Marked');
-      toast.success(`Saved ${payload.length} records`);
-      await loadGrid();
+      toast.success(`Saved ${payload.length} records`, { id: 'attendance-save-toast' });
+      await loadGrid(sortBy, { showToast: false });
     } catch (e) {
+      ignoreNextSocketMarkedRef.current = false;
       toast.error(e.message);
     } finally {
       setSaving(false);
@@ -390,7 +417,13 @@ export default function Attendance() {
             )}
 
             <div className="flex items-end">
-              <Button onClick={() => loadGrid()} icon={Users} className="w-full" disabled={!classId || !sectionId || loadingStudents} loading={loadingStudents}>
+              <Button
+                onClick={() => loadGrid(sortBy, { showToast: true })}
+                icon={Users}
+                className="w-full"
+                disabled={!classId || !sectionId || loadingStudents}
+                loading={loadingStudents}
+              >
                 Load Students
               </Button>
             </div>
@@ -505,3 +538,4 @@ export default function Attendance() {
     </div>
   );
 }
+

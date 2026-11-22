@@ -148,11 +148,17 @@ const validatePagination = [
   handleValidation,
 ];
 
+// ✅ NEW: parameterized variant for routes with non-`:id` param names
+const validateParamId = (paramName = 'id') => [
+  param(paramName).isInt({ min: 1 }),
+  handleValidation,
+];
+
 // ─── exports ────────────────────────────────────────────────────────────
 module.exports = {
   handleValidation,
   validateRegister, validateLogin, validateStaffRegister, validateChangePassword,
   validateSendOtp, validateVerifyOtp, validateResetPassword, validateVerifyRegisterOtp,
   validateStudent, validateTeacher, validateAttendance, validateRemarksUpdate,
-  validatePayment, validateTimetable, validateId, validatePagination,
+  validatePayment, validateTimetable, validateId, validatePagination,validateParamId,
 };

@@ -47,6 +47,8 @@ import TimetableGridPage from './pages/TimetableGridPage';
 import TimetableSettings from './pages/TimetableSettings';
 import VerifyOtp from './pages/VerifyOtp';
 
+/* ─────────────────────────── Guard ─────────────────────────── */
+
 function Protected({ children, adminOnly = false, roles = null }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="p-8 text-center">Loading…</div>;
@@ -55,6 +57,8 @@ function Protected({ children, adminOnly = false, roles = null }) {
   if (roles && !roles.includes(user.role)) return <Navigate to="/dashboard" replace />;
   return children;
 }
+
+/* ─────────────────────────── App shell ─────────────────────────── */
 
 function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -77,6 +81,8 @@ function AppLayout() {
     </div>
   );
 }
+
+/* ─────────────────────────── Root App ─────────────────────────── */
 
 export default function App() {
   return (
@@ -101,43 +107,99 @@ export default function App() {
               />
 
               <Routes>
-                {/* Auth pages */}
+                {/* ── Auth pages ─────────────────────────────────────── */}
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
                 <Route path="/forgot-password" element={<ForgotPassword />} />
                 <Route path="/verify-otp" element={<VerifyOtp />} />
                 <Route path="/reset-password" element={<ResetPassword />} />
 
-                {/* App shell */}
+                {/* ── App shell ──────────────────────────────────────── */}
                 <Route path="/" element={<Protected><AppLayout /></Protected>}>
                   <Route index element={<Navigate to="/dashboard" replace />} />
 
                   <Route path="dashboard" element={<Dashboard />} />
+
+                  {/* Classes (list + nested class/section views) */}
                   <Route path="classes" element={<Classes />} />
                   <Route path="classes/:classId" element={<Classes />} />
                   <Route path="classes/:classId/sections/:sectionId" element={<Classes />} />
 
-                  {/* Subjects Route properly nested inside AppLayout */}
                   <Route path="subjects" element={<Subjects />} />
 
-                  <Route path="students" element={<Students />} />
-                  <Route path="students/:studentId" element={<StudentDetail />} />
+                  {/* Students — admin/teacher only */}
+                  <Route
+                    path="students"
+                    element={
+                      <Protected roles={['admin', 'teacher']}>
+                        <Students />
+                      </Protected>
+                    }
+                  />
+                  <Route
+                    path="students/:studentId"
+                    element={
+                      <Protected roles={['admin', 'teacher']}>
+                        <StudentDetail />
+                      </Protected>
+                    }
+                  />
+                  <Route
+                    path="students/:studentId/report-card"
+                    element={
+                      <Protected roles={['admin', 'teacher']}>
+                        <ReportCard />
+                      </Protected>
+                    }
+                  />
+
+                  {/* Teachers */}
                   <Route path="teachers" element={<Teachers />} />
                   <Route path="teachers/:teacherId" element={<TeacherDetail />} />
 
+                  {/* Attendance */}
                   <Route path="attendance" element={<Attendance />} />
-                  <Route path="attendance/view" element={<Protected roles={['admin', 'teacher']}><AttendanceOverview /></Protected>} />
-                  <Route path="attendance/section/:sectionId" element={<Protected roles={['admin', 'teacher']}><SectionDetail /></Protected>} />
-                  <Route path="attendance/student/:studentId" element={<Protected roles={['admin', 'teacher']}><StudentAttendanceHistory /></Protected>} />
-                  <Route path="my-attendance" element={<Protected roles={['student']}><MyAttendance /></Protected>} />
+                  <Route
+                    path="attendance/view"
+                    element={
+                      <Protected roles={['admin', 'teacher']}>
+                        <AttendanceOverview />
+                      </Protected>
+                    }
+                  />
+                  <Route
+                    path="attendance/section/:sectionId"
+                    element={
+                      <Protected roles={['admin', 'teacher']}>
+                        <SectionDetail />
+                      </Protected>
+                    }
+                  />
+                  <Route
+                    path="attendance/student/:studentId"
+                    element={
+                      <Protected roles={['admin', 'teacher']}>
+                        <StudentAttendanceHistory />
+                      </Protected>
+                    }
+                  />
+                  <Route
+                    path="my-attendance"
+                    element={
+                      <Protected roles={['student']}>
+                        <MyAttendance />
+                      </Protected>
+                    }
+                  />
 
+                  {/* Exams / Homework */}
                   <Route path="exams" element={<Exams />} />
                   <Route path="exams/:examId" element={<Exams />} />
                   <Route path="homework" element={<Homework />} />
                   <Route path="homework/:homeworkId" element={<Homework />} />
                   <Route path="documents" element={<Documents />} />
 
-                  {/* Timetable Routes — specific sub-paths must come before :sectionId */}
+                  {/* Timetable — specific paths before :sectionId */}
                   <Route path="timetable" element={<Timetable />} />
                   <Route
                     path="timetable/settings"
@@ -145,28 +207,79 @@ export default function App() {
                   />
                   <Route
                     path="timetable/grid"
-                    element={<Protected roles={['admin', 'teacher']}><TimetableGridPage /></Protected>}
+                    element={
+                      <Protected roles={['admin', 'teacher']}>
+                        <TimetableGridPage />
+                      </Protected>
+                    }
                   />
                   <Route path="timetable/:sectionId" element={<TimetableGridPage />} />
 
+                  {/* Fees */}
                   <Route path="fees" element={<Fees />} />
-                  <Route path="mcq" element={<Protected roles={['admin', 'teacher', 'student']}><Mcq /></Protected>} />
-                  <Route path="mcq/:examId" element={<Protected roles={['admin', 'teacher', 'student']}><Mcq /></Protected>} />
-                  <Route path="mcq/:examId/take" element={<Protected roles={['student']}><TakeMcq /></Protected>} />
-                  <Route path="mcq/:examId/attempts" element={<Protected roles={['admin', 'teacher']}><McqAttempts /></Protected>} />
 
-                  <Route path="my-results" element={<Protected roles={['student']}><MyResults /></Protected>} />
-                  <Route path="students/:studentId/report-card" element={<ReportCard />} />
+                  {/* Donations ledger — now inside the shell so it renders with sidebar/topbar */}
+                  <Route path="donations" element={<DonationsLedgerPage />} />
+
+                  {/* MCQ / Online tests */}
+                  <Route
+                    path="mcq"
+                    element={
+                      <Protected roles={['admin', 'teacher', 'student']}>
+                        <Mcq />
+                      </Protected>
+                    }
+                  />
+                  <Route
+                    path="mcq/:examId"
+                    element={
+                      <Protected roles={['admin', 'teacher', 'student']}>
+                        <Mcq />
+                      </Protected>
+                    }
+                  />
+                  <Route
+                    path="mcq/:examId/take"
+                    element={
+                      <Protected roles={['student']}>
+                        <TakeMcq />
+                      </Protected>
+                    }
+                  />
+                  <Route
+                    path="mcq/:examId/attempts"
+                    element={
+                      <Protected roles={['admin', 'teacher']}>
+                        <McqAttempts />
+                      </Protected>
+                    }
+                  />
+
+                  <Route
+                    path="my-results"
+                    element={
+                      <Protected roles={['student']}>
+                        <MyResults />
+                      </Protected>
+                    }
+                  />
+
+                  {/* Library / Notices / Profile */}
                   <Route path="library" element={<Library />} />
                   <Route path="notices" element={<Notices />} />
                   <Route path="notices/:noticeId" element={<Notices />} />
                   <Route path="profile" element={<Profile />} />
+
+                  {/* Admin-only */}
                   <Route path="settings" element={<Protected adminOnly><Settings /></Protected>} />
-                  <Route path="pending-users" element={<Protected adminOnly><PendingUsers /></Protected>} />
+                  <Route
+                    path="pending-users"
+                    element={<Protected adminOnly><PendingUsers /></Protected>}
+                  />
                 </Route>
 
+                {/* ── Catch-all (must be last) ───────────────────────── */}
                 <Route path="*" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/donations" element={<DonationsLedgerPage />} />
               </Routes>
             </BrowserRouter>
           </SocketProvider>
@@ -175,4 +288,3 @@ export default function App() {
     </SettingsProvider>
   );
 }
-
