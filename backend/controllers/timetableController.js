@@ -10,13 +10,38 @@ const StudentModel    = require('../models/studentModel');
 
 // ─── Constants ───
 const DAYS = DAYS_OF_WEEK; // ['Monday','Tuesday',…]
+const NO_PERIODS_MSG = 'You have not entered periods yet.';
+const TIME_24H_REGEX = /^([01]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
+const TIME_12H_REGEX = /^(0?[1-9]|1[0-2]):([0-5]\d)\s*(AM|PM)$/i;
 
 // ─── Helpers ───
-const isTime = (s) => /^\d{1,2}:\d{2}(:\d{2})?$/.test(String(s || '').trim());
+const isTime = (s) => {
+  const str = String(s || '').trim();
+  return TIME_24H_REGEX.test(str) || TIME_12H_REGEX.test(str);
+};
 
 const normalizeTime = (s) => {
-  const [h, m] = String(s).trim().split(':');
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`;
+  const str = String(s || '').trim();
+
+  const match12 = str.toUpperCase().match(TIME_12H_REGEX);
+  if (match12) {
+    let h = Number(match12[1]);
+    const m = match12[2];
+    const meridian = match12[3];
+    if (meridian === 'AM' && h === 12) h = 0;
+    if (meridian === 'PM' && h !== 12) h += 12;
+    return `${String(h).padStart(2, '0')}:${m}:00`;
+  }
+
+  const match24 = str.match(TIME_24H_REGEX);
+  if (match24) {
+    const h = String(Number(match24[1])).padStart(2, '0');
+    const m = match24[2];
+    const sec = match24[3] || '00';
+    return `${h}:${m}:${sec}`;
+  }
+
+  return null;
 };
 
 const DAY_ALIASES = {
@@ -37,26 +62,33 @@ const _validateTimetableChange = async ({
   section_id, subject_id, teacher_id = null,
   day_of_week, start_time, end_time, except_id = null,
 }) => {
-  if (!section_id)  return { ok: false, msg: 'section_id required' };
-  if (!subject_id)  return { ok: false, msg: 'subject_id required' };
+  if (!section_id || Number.isNaN(Number(section_id)))
+    return { ok: false, msg: 'section_id is required and must be a valid number' };
+  if (!subject_id || Number.isNaN(Number(subject_id)))
+    return { ok: false, msg: 'subject_id is required and must be a valid number' };
 
   const day = normalizeDay(day_of_week);
   if (!day || !DAYS.includes(day))
-    return { ok: false, msg: `day_of_week must be one of ${DAYS.join(', ')}` };
+    return { ok: false, msg: `day_of_week is required and must be one of ${DAYS.join(', ')}` };
 
-  if (!start_time || !end_time || !isTime(start_time) || !isTime(end_time))
-    return { ok: false, msg: 'start_time and end_time must be HH:MM' };
+  if (!start_time || String(start_time).trim() === '' || !isTime(start_time))
+    return { ok: false, msg: 'start_time is required and must be a valid 12-hour (08:00 AM) or 24-hour (08:00) time' };
+
+  if (!end_time || String(end_time).trim() === '' || !isTime(end_time))
+    return { ok: false, msg: 'end_time is required and must be a valid 12-hour (08:35 AM) or 24-hour (08:35) time' };
 
   const start = normalizeTime(start_time);
   const end   = normalizeTime(end_time);
+  if (!start || !end)
+    return { ok: false, msg: 'start_time and end_time could not be normalized' };
   if (start >= end)
-    return { ok: false, msg: 'start_time must be before end_time' };
+    return { ok: false, msg: `end_time (${end_time}) must be later than start_time (${start_time})` };
 
   const sec = await ClassModel.findSection(Number(section_id));
-  if (!sec) return { ok: false, msg: 'Section not found' };
+  if (!sec) return { ok: false, msg: `Section with id ${section_id} not found` };
 
   const subject = await SubjectModel.findById(Number(subject_id));
-  if (!subject) return { ok: false, msg: 'Subject not found' };
+  if (!subject) return { ok: false, msg: `Subject with id ${subject_id} not found` };
   if (subject.class_id && subject.class_id !== sec.class_id) {
     return {
       ok: false,
@@ -106,10 +138,11 @@ const listTimetable = async (req, res, next) => {
       section_id: req.query.section_id ? Number(req.query.section_id) : undefined,
       teacher_id: req.query.teacher_id ? Number(req.query.teacher_id) : undefined,
       class_id:   req.query.class_id   ? Number(req.query.class_id)   : undefined,
-      day:        req.query.day,
+      day:        req.query.day ? normalizeDay(req.query.day) : undefined,
     };
     const rows = await TimetableModel.list(filters);
-    return apiResponse(res, 200, true, 'Timetable', rows);
+    const msg = rows.length ? 'Timetable' : NO_PERIODS_MSG;
+    return apiResponse(res, 200, true, msg, rows);
   } catch (e) { next(e); }
 };
 
@@ -117,8 +150,10 @@ const listTimetable = async (req, res, next) => {
 const weeklyGrid = async (req, res, next) => {
   try {
     const section_id = Number(req.params.sectionId);
+    if (!section_id) return apiResponse(res, 400, false, 'sectionId is required');
     const rows = await TimetableModel.weeklyForSection(section_id);
-    return apiResponse(res, 200, true, 'Weekly grid', rows);
+    const msg = rows.length ? 'Weekly grid' : NO_PERIODS_MSG;
+    return apiResponse(res, 200, true, msg, rows);
   } catch (e) { next(e); }
 };
 
@@ -126,6 +161,7 @@ const weeklyGrid = async (req, res, next) => {
 const getSlot = async (req, res, next) => {
   try {
     const id = Number(req.params.id);
+    if (!id) return apiResponse(res, 400, false, 'Valid slot id is required');
     const slot = await TimetableModel.findById(id);
     if (!slot) return apiResponse(res, 404, false, 'Slot not found');
     return apiResponse(res, 200, true, 'Slot', slot);
@@ -140,7 +176,7 @@ const createSlot = async (req, res, next) => {
 
     const payload = v.normalized;
 
-    if (req.user.role !== 'admin') {
+    if (req.user && req.user.role !== 'admin') {
       const { lastID } = await ApprovalModel.create({
         resource_type: 'timetable', action: 'create',
         payload, requested_by: req.user.id,
@@ -159,16 +195,17 @@ const createSlot = async (req, res, next) => {
 const updateSlot = async (req, res, next) => {
   try {
     const id = Number(req.params.id);
+    if (!id) return apiResponse(res, 400, false, 'Valid slot id is required');
     const existing = await TimetableModel.findById(id);
     if (!existing) return apiResponse(res, 404, false, 'Slot not found');
 
     const proposed = {
-      section_id:  req.body.section_id  ?? existing.section_id,
-      subject_id:  req.body.subject_id  ?? existing.subject_id,
-      teacher_id:  req.body.teacher_id  ?? existing.teacher_id,
-      day_of_week: req.body.day_of_week ?? existing.day_of_week,
-      start_time:  req.body.start_time  ?? existing.start_time,
-      end_time:    req.body.end_time    ?? existing.end_time,
+      section_id:  req.body.section_id  !== undefined ? req.body.section_id  : existing.section_id,
+      subject_id:  req.body.subject_id  !== undefined ? req.body.subject_id  : existing.subject_id,
+      teacher_id:  req.body.teacher_id  !== undefined ? req.body.teacher_id  : existing.teacher_id,
+      day_of_week: req.body.day_of_week !== undefined ? req.body.day_of_week : existing.day_of_week,
+      start_time:  req.body.start_time  !== undefined ? req.body.start_time  : existing.start_time,
+      end_time:    req.body.end_time    !== undefined ? req.body.end_time    : existing.end_time,
     };
 
     const v = await _validateTimetableChange({ ...proposed, except_id: id });
@@ -176,7 +213,7 @@ const updateSlot = async (req, res, next) => {
 
     const next_vals = v.normalized;
 
-    if (req.user.role !== 'admin') {
+    if (req.user && req.user.role !== 'admin') {
       const { lastID } = await ApprovalModel.create({
         resource_type: 'timetable', action: 'update', resource_id: id,
         payload: next_vals, requested_by: req.user.id,
@@ -195,10 +232,11 @@ const updateSlot = async (req, res, next) => {
 const deleteSlot = async (req, res, next) => {
   try {
     const id = Number(req.params.id);
+    if (!id) return apiResponse(res, 400, false, 'Valid slot id is required');
     const slot = await TimetableModel.findById(id);
     if (!slot) return apiResponse(res, 404, false, 'Slot not found');
 
-    if (req.user.role !== 'admin') {
+    if (req.user && req.user.role !== 'admin') {
       const { lastID } = await ApprovalModel.create({
         resource_type: 'timetable', action: 'delete', resource_id: id,
         payload: { id }, requested_by: req.user.id,
@@ -221,7 +259,8 @@ const myTimetable = async (req, res, next) => {
       return apiResponse(res, 403, false, 'No section assigned to your account');
     }
     const rows = await TimetableModel.weeklyForSection(student.section_id);
-    return apiResponse(res, 200, true, 'My timetable', rows);
+    const msg = rows.length ? 'My timetable' : NO_PERIODS_MSG;
+    return apiResponse(res, 200, true, msg, rows);
   } catch (e) { next(e); }
 };
 
@@ -250,14 +289,16 @@ const myTeachingSchedule = async (req, res, next) => {
     const teacher = await TeacherModel.findByUserId(req.user.id);
     if (!teacher) return apiResponse(res, 403, false, 'Not a teacher');
     const rows = await TimetableModel.byTeacher(teacher.id);
-    return apiResponse(res, 200, true, 'My teaching schedule', rows);
+    const msg = rows.length ? 'My teaching schedule' : NO_PERIODS_MSG;
+    return apiResponse(res, 200, true, msg, rows);
   } catch (e) { next(e); }
 };
 
 const schoolTimetable = async (req, res, next) => {
   try {
     const rows = await TimetableModel.schoolGrid();
-    return apiResponse(res, 200, true, 'School timetable', rows);
+    const msg = rows.length ? 'School timetable' : NO_PERIODS_MSG;
+    return apiResponse(res, 200, true, msg, rows);
   } catch (e) { next(e); }
 };
 
@@ -268,12 +309,13 @@ const searchTimetable = async (req, res, next) => {
       section_id: req.query.section_id ? Number(req.query.section_id) : undefined,
       teacher_id: req.query.teacher_id ? Number(req.query.teacher_id) : undefined,
       subject_id: req.query.subject_id ? Number(req.query.subject_id) : undefined,
-      day:        req.query.day,
+      day:        req.query.day ? normalizeDay(req.query.day) : undefined,
       period:     req.query.period,
       q:          req.query.q,
     };
     const rows = await TimetableModel.searchSlots(filters);
-    return apiResponse(res, 200, true, 'Timetable search', rows);
+    const msg = rows.length ? 'Timetable search' : NO_PERIODS_MSG;
+    return apiResponse(res, 200, true, msg, rows);
   } catch (e) { next(e); }
 };
 
@@ -283,10 +325,11 @@ const searchTimetable = async (req, res, next) => {
 
 const getGrid = async (req, res, next) => {
   try {
-    const day = req.query.day || 'monday';
+    const day = normalizeDay(req.query.day || 'monday');
     const { periods, sections } = await TimetableModel.gridForDay(day);
     const teacherLoad = await TimetableModel.teacherLoad(day);
-    return apiResponse(res, 200, true, 'Timetable grid', {
+    const msg = Array.isArray(periods) && periods.length ? 'Timetable grid' : NO_PERIODS_MSG;
+    return apiResponse(res, 200, true, msg, {
       day, periods, sections, teacherLoad,
     });
   } catch (e) { next(e); }
@@ -294,7 +337,7 @@ const getGrid = async (req, res, next) => {
 
 const getTeacherLoad = async (req, res, next) => {
   try {
-    const day = req.query.day || null;
+    const day = req.query.day ? normalizeDay(req.query.day) : null;
     const load = await TimetableModel.teacherLoad(day);
     return apiResponse(res, 200, true, 'Teacher load', load);
   } catch (e) { next(e); }
@@ -302,11 +345,29 @@ const getTeacherLoad = async (req, res, next) => {
 
 const bulkEdit = async (req, res, next) => {
   try {
-    const { day, entries } = req.body;
-    if (!day || !Array.isArray(entries)) {
-      return apiResponse(res, 400, false, 'day and entries required');
+    const { day, entries } = req.body || {};
+    const normalizedDay = normalizeDay(day);
+    if (!normalizedDay || !DAYS.includes(normalizedDay)) {
+      return apiResponse(res, 400, false, `day is required and must be one of ${DAYS.join(', ')}`);
     }
-    const result = await TimetableModel.bulkUpsert(entries);
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return apiResponse(res, 400, false, NO_PERIODS_MSG);
+    }
+
+    const normalizedEntries = [];
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i] || {};
+      const v = await _validateTimetableChange({
+        ...entry,
+        day_of_week: entry.day_of_week || normalizedDay,
+      });
+      if (!v.ok) {
+        return apiResponse(res, 400, false, `Entry ${i + 1}: ${v.msg}`);
+      }
+      normalizedEntries.push(v.normalized);
+    }
+
+    const result = await TimetableModel.bulkUpsert(normalizedEntries);
     return apiResponse(res, 200, true, 'Bulk edit saved', result);
   } catch (e) { next(e); }
 };
@@ -329,3 +390,4 @@ module.exports = {
   getTeacherLoad,
   bulkEdit,
 };
+

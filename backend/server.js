@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
+const fs = require('fs');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
@@ -13,11 +14,36 @@ const logger = require('./utils/logger');
 const socket = require('./realtime/socket');
 const { startMcqScheduler } = require('./realtime/mcqScheduler');
 const { close: closeDb } = require('./config/database');
+const { runMigrations, resolveDbPath, resolveBackupDir } = require('./migrate');
 
 const app = express();
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const PORT = Number(process.env.PORT) || 5000;
-const HOST = process.env.HOST || '0.0.0.0';
+// Default to 127.0.0.1 when HOST is unset to avoid Windows Firewall prompts in Electron;
+// override via HOST=0.0.0.0 in .env when LAN access is desired.
+const HOST = process.env.HOST || '127.0.0.1';
+
+const DB_PATH = resolveDbPath(process.env.DB_PATH);
+const BACKUP_DIR = resolveBackupDir(process.env.BACKUP_DIR);
+const UPLOADS_DIR = path.resolve(
+  process.env.UPLOADS_DIR ||
+    (process.env.SCHOOL_DATA_DIR
+      ? path.join(process.env.SCHOOL_DATA_DIR, 'uploads')
+      : path.join(__dirname, 'uploads'))
+);
+const FRONTEND_DIST_DIR = path.resolve(
+  process.env.FRONTEND_DIST_DIR || path.resolve(__dirname, '../frontend/dist')
+);
+
+// Normalize resolved paths for downstream routes, upload handlers, and schedulers
+process.env.DB_PATH = DB_PATH;
+process.env.BACKUP_DIR = BACKUP_DIR;
+process.env.UPLOADS_DIR = UPLOADS_DIR;
+process.env.FRONTEND_DIST_DIR = FRONTEND_DIST_DIR;
+
+fs.mkdirSync(BACKUP_DIR, { recursive: true });
+fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+fs.mkdirSync(path.join(UPLOADS_DIR, 'mcq'), { recursive: true });
 
 // Disable ETag so Express does not return 304 Not Modified responses
 app.set('etag', false);
@@ -64,24 +90,44 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('combined', { stream: { write: (m) => logger.access(m.trim()) } }));
 
-// Static files
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Static files (writable UPLOADS_DIR + app static assets)
+app.use('/uploads', express.static(UPLOADS_DIR));
 app.use('/static', express.static(path.join(__dirname, 'public')));
 
-// Health check & API Routes (no-cache applied to /api)
-app.get('/health', (_req, res) => res.json({ ok: true, env: NODE_ENV, ts: Date.now() }));
+// Health checks (supports both /health and /api/health readiness probes)
+const healthHandler = (_req, res) =>
+  res.json({
+    ok: true,
+    env: NODE_ENV,
+    dbPath: DB_PATH,
+    backupDir: BACKUP_DIR,
+    ts: Date.now(),
+  });
+app.get('/health', healthHandler);
+app.get('/api/health', healthHandler);
+
 app.use('/api', noCacheMiddleware, routes);
 
-// Serve built frontend in production (must come BEFORE notFound)
-if (NODE_ENV === 'production') {
-  const distPath = path.resolve(__dirname, '../frontend/dist');
-  app.use(express.static(distPath));
+// Serve built frontend in production or when FRONTEND_DIST_DIR exists (e.g., Electron)
+const indexHtmlPath = path.join(FRONTEND_DIST_DIR, 'index.html');
+if (NODE_ENV === 'production' || fs.existsSync(indexHtmlPath)) {
+  if (fs.existsSync(FRONTEND_DIST_DIR)) {
+    app.use(express.static(FRONTEND_DIST_DIR));
+  }
 
   app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api') || req.path.startsWith('/uploads') || req.path.startsWith('/static')) {
+    if (
+      req.path.startsWith('/api') ||
+      req.path.startsWith('/uploads') ||
+      req.path.startsWith('/static') ||
+      req.path.startsWith('/socket.io')
+    ) {
       return next();
     }
-    return res.sendFile(path.join(distPath, 'index.html'));
+    if (fs.existsSync(indexHtmlPath)) {
+      return res.sendFile(indexHtmlPath);
+    }
+    return next();
   });
 }
 
@@ -93,17 +139,6 @@ const server = http.createServer(app);
 
 // Initialize Socket.io (pass corsConfig if your socket.init accepts options)
 socket.init(server, corsConfig);
-
-server.listen(PORT, HOST, () => {
-  logger.info(`Server listening on http://${HOST}:${PORT} [${NODE_ENV}]`);
-
-  try {
-    startMcqScheduler();
-    logger.info('MCQ Scheduler started successfully');
-  } catch (e) {
-    logger.error('Scheduler init failed:', e);
-  }
-});
 
 // Graceful Shutdown Handling
 let shuttingDown = false;
@@ -142,5 +177,47 @@ const shutdown = async (signal) => {
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
-module.exports = { app, server };
+async function startServer() {
+  try {
+    runMigrations({
+      dbPath: DB_PATH,
+      backupDir: BACKUP_DIR,
+      noBackup: process.env.SKIP_STARTUP_BACKUP === '1',
+    });
+  } catch (err) {
+    logger.error('Startup migration failed:', err);
+    throw err;
+  }
+
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(PORT, HOST, () => {
+      server.removeListener('error', reject);
+      logger.info(`Server listening on http://${HOST}:${PORT} [${NODE_ENV}]`);
+      logger.info(`SQLite DB: ${DB_PATH}`);
+      logger.info(`Backups Dir: ${BACKUP_DIR}`);
+      logger.info(`Uploads Dir: ${UPLOADS_DIR}`);
+      logger.info(`Frontend Dir: ${FRONTEND_DIST_DIR}`);
+
+      try {
+        startMcqScheduler();
+        logger.info('MCQ Scheduler started successfully');
+      } catch (e) {
+        logger.error('Scheduler init failed:', e);
+      }
+
+      resolve();
+    });
+  });
+
+  return server;
+}
+
+if (require.main === module) {
+  startServer().catch(() => {
+    process.exit(1);
+  });
+}
+
+module.exports = { app, server, startServer };
 

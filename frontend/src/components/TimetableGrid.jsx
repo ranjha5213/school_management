@@ -5,10 +5,31 @@ import Card from './Card';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-export const fmtTime = (v) => (v ? String(v).slice(0, 5) : '--:--');
-export const periodKey = (v) => (v ? String(v).slice(0, 5) : '');
+// ─── Time helpers ───
+// Accept "HH:MM", "HH:MM:SS", "H:MM" and return "HH:MM".
+export const fmtTime = (v) => {
+  if (!v) return '--:--';
+  const m = String(v).match(/^(\d{1,2}):(\d{2})/);
+  return m ? `${String(Number(m[1])).padStart(2, '0')}:${m[2]}` : String(v).slice(0, 5);
+};
 
-const normalizeText = (name) => String(name || '').trim().toLowerCase();
+// Same normalization, but returns '' instead of a fallback string.
+export const periodKey = (v) => {
+  if (!v) return '';
+  const m = String(v).match(/^(\d{1,2}):(\d{2})/);
+  return m ? `${String(Number(m[1])).padStart(2, '0')}:${m[2]}` : '';
+};
+
+const toSafeText = (val) => {
+  if (val === null || val === undefined) return '';
+  if (typeof val === 'string' || typeof val === 'number') return String(val);
+  if (typeof val === 'object') {
+    return String(val.subject_name || val.teacher_name || val.name || val.title || '');
+  }
+  return '';
+};
+
+const normalizeText = (name) => toSafeText(name).trim().toLowerCase();
 
 const getSubjectName = (s) =>
   typeof s === 'string'
@@ -19,22 +40,6 @@ const getTeacherName = (t) =>
   typeof t === 'string'
     ? t.trim()
     : String(t?.name || t?.teacher_name || t?.full_name || '').trim();
-
-const getTeacherLinkedSubject = (t, subjectIdToName) => {
-  if (!t || typeof t === 'string') return '';
-  if (t.subject_name || t.subject) return String(t.subject_name || t.subject).trim();
-  if (Array.isArray(t.subjects) && t.subjects.length) {
-    const first = t.subjects[0];
-    if (typeof first === 'string') return first.trim();
-    const linked = getSubjectName(first);
-    if (linked) return linked;
-  }
-  const sid = t.subject_id ?? t.subjectId;
-  if (sid !== undefined && sid !== null && subjectIdToName.has(String(sid))) {
-    return subjectIdToName.get(String(sid));
-  }
-  return '';
-};
 
 function rankSubjectMatches(query, subjectList) {
   const q = normalizeText(query);
@@ -62,16 +67,13 @@ function rankSubjectMatches(query, subjectList) {
     .slice(0, 6);
 }
 
-function rankTeacherMatches(query, teacherList, preferredSubject = '') {
+function rankTeacherMatches(query, teacherList) {
   const q = normalizeText(query);
   if (!q) return [];
-
-  const prefSubj = normalizeText(preferredSubject);
 
   return teacherList
     .map((entry) => {
       const nameLower = normalizeText(entry.name);
-      const subjLower = normalizeText(entry.subject);
       if (!nameLower) return null;
 
       const words = nameLower.split(/\s+/).filter(Boolean);
@@ -81,14 +83,9 @@ function rankTeacherMatches(query, teacherList, preferredSubject = '') {
 
       if (!fullPrefix && !wordPrefix && !substringMatch) return null;
 
-      let rank = fullPrefix ? 0 : wordPrefix ? 1 : 2;
-      if (prefSubj && subjLower && subjLower.includes(prefSubj)) {
-        rank -= 0.5;
-      }
-
       return {
         ...entry,
-        rank,
+        rank: fullPrefix ? 0 : wordPrefix ? 1 : 2,
       };
     })
     .filter(Boolean)
@@ -113,6 +110,45 @@ const sameDayAndPeriod = (a, b) => {
   );
 };
 
+// Find the slot for (day, period) — works with or without period_index.
+const findSlotForCell = (timetable, day, period, pIdx) => {
+  if (!Array.isArray(timetable) || !timetable.length) return null;
+  const targetDay = String(day || '').trim().toLowerCase();
+  const targetTime = periodKey(period?.start_time);
+
+  // 1. Explicit period_index match
+  if (pIdx !== undefined && pIdx !== null) {
+    const byIdx = timetable.find(
+      (t) =>
+        String(t.day_of_week || '').trim().toLowerCase() === targetDay &&
+        Number(t.period_index) === Number(pIdx)
+    );
+    if (byIdx) return byIdx;
+  }
+
+  // 2. start_time match (normalized to HH:MM)
+  if (targetTime) {
+    const byTime = timetable.find(
+      (t) =>
+        String(t.day_of_week || '').trim().toLowerCase() === targetDay &&
+        periodKey(t.start_time) === targetTime
+    );
+    if (byTime) return byTime;
+  }
+
+  // 3. period_name fallback
+  if (period?.name) {
+    const byName = timetable.find(
+      (t) =>
+        String(t.day_of_week || '').trim().toLowerCase() === targetDay &&
+        t.period_name === period.name
+    );
+    if (byName) return byName;
+  }
+
+  return null;
+};
+
 function SlotCell({
   day,
   period,
@@ -122,40 +158,63 @@ function SlotCell({
   currentTeacher,
   subjectCatalog,
   teacherCatalog,
-  teacherSubjectMap,
   isHighlighted,
   isDimmed,
   isEditable,
   conflictText,
   onUpdateCell,
 }) {
-  const [subjectDraft, setSubjectDraft] = useState(currentSubject);
-  const [teacherDraft, setTeacherDraft] = useState(currentTeacher);
+  const safeCurrentSubject = toSafeText(currentSubject);
+  const safeCurrentTeacher = toSafeText(currentTeacher);
+
+  const [subjectDraft, setSubjectDraft] = useState(safeCurrentSubject);
+  const [teacherDraft, setTeacherDraft] = useState(safeCurrentTeacher);
   const [focusedField, setFocusedField] = useState(null);
   const [openDropdown, setOpenDropdown] = useState(null);
   const [activeSubjectIdx, setActiveSubjectIdx] = useState(0);
   const [activeTeacherIdx, setActiveTeacherIdx] = useState(0);
 
   const cellRef = useRef(null);
-  const subjectDraftRef = useRef(subjectDraft);
-  subjectDraftRef.current = subjectDraft;
+  const subjectDraftRef = useRef(toSafeText(subjectDraft));
+  const teacherDraftRef = useRef(toSafeText(teacherDraft));
+  const dirtySubjectRef = useRef(false);
+  const dirtyTeacherRef = useRef(false);
+  const prevSubjectPropRef = useRef(safeCurrentSubject);
+  const prevTeacherPropRef = useRef(safeCurrentTeacher);
+
+  const safeSubjectDraft = toSafeText(subjectDraft);
+  const safeTeacherDraft = toSafeText(teacherDraft);
+
+  subjectDraftRef.current = safeSubjectDraft;
+  teacherDraftRef.current = safeTeacherDraft;
 
   useEffect(() => {
-    if (focusedField !== 'subject') {
-      setSubjectDraft(currentSubject);
+    const propChanged = prevSubjectPropRef.current !== safeCurrentSubject;
+    prevSubjectPropRef.current = safeCurrentSubject;
+    if (propChanged) {
+      dirtySubjectRef.current = false;
     }
-  }, [currentSubject, focusedField]);
+    if (focusedField !== 'subject' && !dirtySubjectRef.current) {
+      setSubjectDraft(safeCurrentSubject);
+    }
+  }, [safeCurrentSubject, focusedField]);
 
   useEffect(() => {
-    if (focusedField !== 'teacher') {
-      setTeacherDraft(currentTeacher);
+    const propChanged = prevTeacherPropRef.current !== safeCurrentTeacher;
+    prevTeacherPropRef.current = safeCurrentTeacher;
+    if (propChanged) {
+      dirtyTeacherRef.current = false;
     }
-  }, [currentTeacher, focusedField]);
+    if (focusedField !== 'teacher' && !dirtyTeacherRef.current) {
+      setTeacherDraft(safeCurrentTeacher);
+    }
+  }, [safeCurrentTeacher, focusedField]);
 
   useEffect(() => {
     const handleOutsideClick = (e) => {
       if (cellRef.current && !cellRef.current.contains(e.target)) {
         setOpenDropdown(null);
+        setFocusedField(null);
       }
     };
     document.addEventListener('mousedown', handleOutsideClick);
@@ -163,56 +222,63 @@ function SlotCell({
   }, []);
 
   const subjectSuggestions = useMemo(() => {
-    if (!isEditable || !subjectDraft.trim()) return [];
-    return rankSubjectMatches(subjectDraft, subjectCatalog);
-  }, [isEditable, subjectDraft, subjectCatalog]);
+    if (!isEditable || !safeSubjectDraft.trim()) return [];
+    return rankSubjectMatches(safeSubjectDraft, subjectCatalog);
+  }, [isEditable, safeSubjectDraft, subjectCatalog]);
 
   const teacherSuggestions = useMemo(() => {
-    if (!isEditable || !teacherDraft.trim()) return [];
-    return rankTeacherMatches(teacherDraft, teacherCatalog, subjectDraft);
-  }, [isEditable, teacherDraft, teacherCatalog, subjectDraft]);
+    if (!isEditable || !safeTeacherDraft.trim()) return [];
+    return rankTeacherMatches(safeTeacherDraft, teacherCatalog);
+  }, [isEditable, safeTeacherDraft, teacherCatalog]);
 
   useEffect(() => {
     setActiveSubjectIdx(0);
-  }, [subjectDraft]);
+  }, [safeSubjectDraft]);
 
   useEffect(() => {
     setActiveTeacherIdx(0);
-  }, [teacherDraft]);
+  }, [safeTeacherDraft]);
+
+  const commitField = (field, nextVal) => {
+    onUpdateCell?.(day, period, pIdx, slot, field, toSafeText(nextVal));
+  };
 
   const applySubjectSelection = (subjItem) => {
-    const chosenSubject = subjItem.name;
+    const chosenSubject = toSafeText(subjItem.name);
+    dirtySubjectRef.current = true;
+    subjectDraftRef.current = chosenSubject;
     setSubjectDraft(chosenSubject);
     setOpenDropdown(null);
-    setFocusedField(null);
-    if (chosenSubject !== currentSubject) {
-      onUpdateCell?.(day, period, pIdx, slot, 'subject', chosenSubject);
-    }
+    commitField('subject', chosenSubject);
   };
 
   const handleSubjectChange = (e) => {
-    const val = e.target.value;
+    const val = toSafeText(e.target.value);
+    dirtySubjectRef.current = true;
+    subjectDraftRef.current = val;
     setSubjectDraft(val);
     setOpenDropdown(val.trim() ? 'subject' : null);
+    commitField('subject', val);
   };
 
   const handleSubjectBlur = () => {
+    const trimmed = toSafeText(subjectDraftRef.current).trim();
+    const matches = trimmed ? rankSubjectMatches(trimmed, subjectCatalog) : [];
+    const singlePrefixMatch =
+      trimmed &&
+      matches.length === 1 &&
+      normalizeText(matches[0].name).startsWith(normalizeText(trimmed))
+        ? toSafeText(matches[0].name)
+        : trimmed;
+
+    subjectDraftRef.current = singlePrefixMatch;
+    setSubjectDraft(singlePrefixMatch);
+    commitField('subject', singlePrefixMatch);
+
     setTimeout(() => {
-      if (cellRef.current?.contains(document.activeElement)) return;
-      setFocusedField(null);
-      if (openDropdown === 'subject') setOpenDropdown(null);
-
-      const trimmed = subjectDraft.trim();
-      const singlePrefixMatch =
-        trimmed &&
-        subjectSuggestions.length === 1 &&
-        normalizeText(subjectSuggestions[0].name).startsWith(normalizeText(trimmed))
-          ? subjectSuggestions[0].name
-          : trimmed;
-
-      setSubjectDraft(singlePrefixMatch);
-      if (singlePrefixMatch !== currentSubject) {
-        onUpdateCell?.(day, period, pIdx, slot, 'subject', singlePrefixMatch);
+      if (!cellRef.current?.contains(document.activeElement)) {
+        setFocusedField((prev) => (prev === 'subject' ? null : prev));
+        setOpenDropdown((prev) => (prev === 'subject' ? null : prev));
       }
     }, 120);
   };
@@ -252,72 +318,42 @@ function SlotCell({
   };
 
   const applyTeacherSelection = (match) => {
-    const chosenName = match.name;
-    const pulledSubject =
-      match.subject || teacherSubjectMap.get(normalizeText(chosenName)) || '';
-
+    const chosenName = toSafeText(match.name);
+    dirtyTeacherRef.current = true;
+    teacherDraftRef.current = chosenName;
     setTeacherDraft(chosenName);
     setOpenDropdown(null);
-    setFocusedField(null);
-
-    if (pulledSubject && !subjectDraftRef.current.trim()) {
-      setSubjectDraft(pulledSubject);
-      onUpdateCell?.(day, period, pIdx, slot, 'subject', pulledSubject);
-    }
-
-    if (chosenName !== currentTeacher) {
-      onUpdateCell?.(day, period, pIdx, slot, 'teacher', chosenName);
-    }
+    commitField('teacher', chosenName);
   };
 
   const handleTeacherChange = (e) => {
-    const val = e.target.value;
+    const val = toSafeText(e.target.value);
+    dirtyTeacherRef.current = true;
+    teacherDraftRef.current = val;
     setTeacherDraft(val);
     setOpenDropdown(val.trim() ? 'teacher' : null);
-
-    const trimmed = val.trim();
-    if (!trimmed) return;
-
-    const matches = rankTeacherMatches(trimmed, teacherCatalog, subjectDraftRef.current);
-    const uniquePrefix =
-      matches.length === 1 && normalizeText(matches[0].name).startsWith(normalizeText(trimmed));
-
-    const pulledSubject = uniquePrefix
-      ? matches[0].subject || teacherSubjectMap.get(normalizeText(matches[0].name)) || ''
-      : '';
-
-    if (pulledSubject && !subjectDraftRef.current.trim()) {
-      setSubjectDraft(pulledSubject);
-      onUpdateCell?.(day, period, pIdx, slot, 'subject', pulledSubject);
-    }
+    commitField('teacher', val);
   };
 
   const handleTeacherBlur = () => {
+    const trimmed = toSafeText(teacherDraftRef.current).trim();
+    const matches = trimmed ? rankTeacherMatches(trimmed, teacherCatalog) : [];
+    const topMatch = matches[0];
+    const shouldSnap =
+      trimmed &&
+      topMatch &&
+      normalizeText(topMatch.name).startsWith(normalizeText(trimmed)) &&
+      matches.length === 1;
+
+    const finalName = shouldSnap ? toSafeText(topMatch.name) : trimmed;
+    teacherDraftRef.current = finalName;
+    setTeacherDraft(finalName);
+    commitField('teacher', finalName);
+
     setTimeout(() => {
-      if (cellRef.current?.contains(document.activeElement)) return;
-      setFocusedField(null);
-      if (openDropdown === 'teacher') setOpenDropdown(null);
-
-      const trimmed = teacherDraft.trim();
-      const topMatch = teacherSuggestions[0];
-      const shouldSnap =
-        trimmed &&
-        topMatch &&
-        normalizeText(topMatch.name).startsWith(normalizeText(trimmed)) &&
-        teacherSuggestions.length === 1;
-
-      const finalName = shouldSnap ? topMatch.name : trimmed;
-      setTeacherDraft(finalName);
-
-      const pulledSubject =
-        topMatch?.subject || teacherSubjectMap.get(normalizeText(finalName)) || '';
-      if (pulledSubject && !subjectDraftRef.current.trim()) {
-        setSubjectDraft(pulledSubject);
-        onUpdateCell?.(day, period, pIdx, slot, 'subject', pulledSubject);
-      }
-
-      if (finalName !== currentTeacher) {
-        onUpdateCell?.(day, period, pIdx, slot, 'teacher', finalName);
+      if (!cellRef.current?.contains(document.activeElement)) {
+        setFocusedField((prev) => (prev === 'teacher' ? null : prev));
+        setOpenDropdown((prev) => (prev === 'teacher' ? null : prev));
       }
     }, 120);
   };
@@ -359,8 +395,8 @@ function SlotCell({
   const hasConflict = Boolean(conflictText);
 
   if (isEditable) {
-    const printableSubject = (subjectDraft || currentSubject || '').trim();
-    const printableTeacher = (teacherDraft || currentTeacher || '').trim();
+    const printableSubject = (safeSubjectDraft || safeCurrentSubject).trim();
+    const printableTeacher = (safeTeacherDraft || safeCurrentTeacher).trim();
 
     return (
       <div
@@ -375,23 +411,11 @@ function SlotCell({
             : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700'
         }`}
       >
-        <div className="text-[10px] text-slate-400 dark:text-slate-500 font-mono text-center">
-          {fmtTime(period.start_time)}–{fmtTime(period.end_time)}
-        </div>
-
-        {/* Print-only text so subject & teacher appear when printing editable grids */}
         <div className="hidden print:block text-center leading-tight text-black">
-          <div className="font-semibold">
-            {printableSubject || '—'}
-          </div>
-          {printableTeacher && (
-            <div className="text-[8px] mt-0.5">
-              {printableTeacher}
-            </div>
-          )}
+          <div className="font-semibold">{printableSubject || '—'}</div>
+          {printableTeacher && <div className="text-[8px] mt-0.5">{printableTeacher}</div>}
         </div>
 
-        {/* Screen editing inputs (hidden during print) */}
         <div className="print:hidden flex flex-col gap-1.5">
           <div className="relative">
             <input
@@ -399,10 +423,10 @@ function SlotCell({
               autoComplete="off"
               className="input text-xs py-1 text-center font-semibold"
               placeholder="Subject Name"
-              value={subjectDraft}
+              value={safeSubjectDraft}
               onFocus={() => {
                 setFocusedField('subject');
-                if (subjectDraft.trim()) setOpenDropdown('subject');
+                if (safeSubjectDraft.trim()) setOpenDropdown('subject');
               }}
               onChange={handleSubjectChange}
               onBlur={handleSubjectBlur}
@@ -454,10 +478,10 @@ function SlotCell({
                   : 'text-slate-600 dark:text-slate-400'
               }`}
               placeholder="Teacher Name"
-              value={teacherDraft}
+              value={safeTeacherDraft}
               onFocus={() => {
                 setFocusedField('teacher');
-                if (teacherDraft.trim()) setOpenDropdown('teacher');
+                if (safeTeacherDraft.trim()) setOpenDropdown('teacher');
               }}
               onChange={handleTeacherChange}
               onBlur={handleTeacherBlur}
@@ -489,12 +513,6 @@ function SlotCell({
                       }`}
                     >
                       <span className="font-semibold truncate">{item.name}</span>
-                      {item.subject && (
-                        <span className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px] font-medium text-slate-600 dark:text-slate-300">
-                          <BookOpen className="w-2.5 h-2.5 text-brand-600" />
-                          {item.subject}
-                        </span>
-                      )}
                     </button>
                   );
                 })}
@@ -537,7 +555,7 @@ function SlotCell({
               : 'text-brand-800 dark:text-brand-300'
           }`}
         >
-          {currentSubject || '—'}
+          {safeCurrentSubject || '—'}
         </div>
         <div
           className={`truncate print:whitespace-normal text-[11px] mt-0.5 ${
@@ -548,11 +566,7 @@ function SlotCell({
               : 'text-slate-600 dark:text-slate-400'
           }`}
         >
-          {currentTeacher || '—'}
-        </div>
-        <div className="text-[10px] text-slate-400 font-mono mt-0.5">
-          {fmtTime(period?.start_time || slot.start_time)}–
-          {fmtTime(period?.end_time || slot.end_time)}
+          {safeCurrentTeacher || '—'}
         </div>
         {hasConflict && (
           <div className="no-print mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-red-700 dark:text-red-300">
@@ -578,13 +592,16 @@ function SlotCell({
 }
 
 export default function TimetableGrid({
-  timetable = [],
+  // Both prop names are accepted to prevent silent empty grids.
+  timetable: timetableProp,
+  slots: slotsProp,
   periods = [],
   fridayPeriods = [],
   periodCount,
   fridayPeriodCount,
   hiddenDays = [],
-  isEditable,
+  isEditable: isEditableProp,
+  canEdit: canEditProp,
   onUpdateCell,
   subjects = [],
   teachers = [],
@@ -592,6 +609,15 @@ export default function TimetableGrid({
   conflicts = [],
   maxWeeklyPeriods = 30,
 }) {
+  // ─── Unify props (accept both legacy and canonical names) ───
+  const timetable = Array.isArray(timetableProp)
+    ? timetableProp
+    : Array.isArray(slotsProp)
+    ? slotsProp
+    : [];
+
+  const isEditable = Boolean(isEditableProp ?? canEditProp ?? false);
+
   const [teacherFilter, setTeacherFilter] = useState('');
   const [subjectFilter, setSubjectFilter] = useState('');
   const [showTeacherDropdown, setShowTeacherDropdown] = useState(false);
@@ -626,59 +652,29 @@ export default function TimetableGrid({
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [subjects, timetable, otherSectionSlots]);
 
-  const { teacherCatalog, teacherSubjectMap } = useMemo(() => {
-    const subjectIdToName = new Map();
-    for (const s of subjects) {
-      const id = s?.id ?? s?.subject_id;
-      const name = getSubjectName(s);
-      if (id !== undefined && id !== null && name) {
-        subjectIdToName.set(String(id), name);
-      }
-    }
-
-    const subjMap = new Map();
+  const teacherCatalog = useMemo(() => {
     const tMap = new Map();
-
-    for (const slot of [...timetable, ...otherSectionSlots]) {
-      const tName = normalizeText(slot.teacher_name || slot.teacher);
-      const sName = String(slot.subject_name || slot.subject || '').trim();
-      if (tName && sName && !subjMap.has(tName)) {
-        subjMap.set(tName, sName);
-      }
-    }
-
     for (const t of teachers) {
       const name = getTeacherName(t);
       const key = normalizeText(name);
       if (!key) continue;
-
-      const linkedSubj =
-        getTeacherLinkedSubject(t, subjectIdToName) || subjMap.get(key) || '';
-      if (linkedSubj && !subjMap.has(key)) {
-        subjMap.set(key, linkedSubj);
+      if (!tMap.has(key)) {
+        tMap.set(key, {
+          key,
+          id: t?.id ?? t?.teacher_id ?? null,
+          name,
+        });
       }
-
-      tMap.set(key, {
-        key,
-        id: t?.id ?? t?.teacher_id ?? null,
-        name,
-        subject: linkedSubj,
-      });
     }
-
     for (const slot of [...timetable, ...otherSectionSlots]) {
       const name = String(slot.teacher_name || slot.teacher || '').trim();
       const key = normalizeText(name);
       if (key && !tMap.has(key)) {
-        tMap.set(key, { key, id: null, name, subject: subjMap.get(key) || '' });
+        tMap.set(key, { key, id: null, name });
       }
     }
-
-    return {
-      teacherCatalog: Array.from(tMap.values()).sort((a, b) => a.name.localeCompare(b.name)),
-      teacherSubjectMap: subjMap,
-    };
-  }, [teachers, subjects, timetable, otherSectionSlots]);
+    return Array.from(tMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [teachers, timetable, otherSectionSlots]);
 
   const teacherFilterQuery = normalizeText(teacherFilter);
   const subjectFilterQuery = normalizeText(subjectFilter);
@@ -706,7 +702,6 @@ export default function TimetableGrid({
         map.set(key, {
           key,
           name: String(rawName).trim(),
-          subject: teacherSubjectMap.get(key) || '',
           sectionPeriods: 0,
           otherSectionPeriods: 0,
         });
@@ -734,7 +729,7 @@ export default function TimetableGrid({
           item.sectionPeriods + item.otherSectionPeriods >= Number(maxWeeklyPeriods || 30),
       }))
       .sort((a, b) => b.totalPeriods - a.totalPeriods || a.name.localeCompare(b.name));
-  }, [timetable, otherSectionSlots, maxWeeklyPeriods, teacherSubjectMap]);
+  }, [timetable, otherSectionSlots, maxWeeklyPeriods]);
 
   const isSlotMatchingFilter = (slot) => {
     if (!teacherFilterQuery && !subjectFilterQuery) return false;
@@ -855,8 +850,8 @@ export default function TimetableGrid({
                   }
                   title={
                     item.otherSectionPeriods > 0
-                      ? `${item.name}${item.subject ? ` (${item.subject})` : ''}: ${item.sectionPeriods} here + ${item.otherSectionPeriods} in other sections`
-                      : `${item.name}${item.subject ? ` (${item.subject})` : ''}: ${item.sectionPeriods} period(s) in this section`
+                      ? `${item.name}: ${item.sectionPeriods} here + ${item.otherSectionPeriods} in other sections`
+                      : `${item.name}: ${item.sectionPeriods} period(s) in this section`
                   }
                   className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border transition-colors ${
                     item.overloaded
@@ -867,11 +862,6 @@ export default function TimetableGrid({
                   }`}
                 >
                   <span>{item.name}</span>
-                  {item.subject && (
-                    <span className="text-[10px] text-slate-400 dark:text-slate-500">
-                      · {item.subject}
-                    </span>
-                  )}
                   <span
                     className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
                       item.overloaded
@@ -892,7 +882,6 @@ export default function TimetableGrid({
       <Card className="p-3 bg-slate-50 dark:bg-slate-800/50 space-y-2.5 no-print">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-4">
-            {/* Teacher Filter */}
             <div className="relative flex items-center gap-2">
               <User className="w-4 h-4 text-brand-600 shrink-0" />
               <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
@@ -935,14 +924,9 @@ export default function TimetableGrid({
                           setTeacherFilter(match.name);
                           setShowTeacherDropdown(false);
                         }}
-                        className="w-full px-2.5 py-1.5 text-xs flex items-center justify-between gap-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800 border-b last:border-b-0 border-slate-100 dark:border-slate-800"
+                        className="w-full px-2.5 py-1.5 text-xs text-left font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 border-b last:border-b-0 border-slate-100 dark:border-slate-800"
                       >
-                        <span className="font-semibold truncate">{match.name}</span>
-                        {match.subject && (
-                          <span className="text-[10px] text-slate-500 shrink-0">
-                            {match.subject}
-                          </span>
-                        )}
+                        {match.name}
                       </button>
                     ))}
                   </div>
@@ -950,7 +934,6 @@ export default function TimetableGrid({
               </div>
             </div>
 
-            {/* Subject Filter */}
             <div className="relative flex items-center gap-2">
               <BookOpen className="w-4 h-4 text-brand-600 shrink-0" />
               <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
@@ -1095,19 +1078,7 @@ export default function TimetableGrid({
                       );
                     }
 
-                    const slot =
-                      timetable.find(
-                        (t) =>
-                          t.day_of_week?.toLowerCase() === day.toLowerCase() &&
-                          (Number(t.period_index) === pIdx ||
-                            (periodKey(t.start_time) &&
-                              periodKey(t.start_time) === periodKey(period.start_time)))
-                      ) ||
-                      timetable.find(
-                        (t) =>
-                          t.day_of_week?.toLowerCase() === day.toLowerCase() &&
-                          t.period_name === period.name
-                      );
+                    const slot = findSlotForCell(timetable, day, period, pIdx);
 
                     const currentSubject = slot?.subject_name || slot?.subject || '';
                     const currentTeacher = slot?.teacher_name || slot?.teacher || '';
@@ -1136,7 +1107,6 @@ export default function TimetableGrid({
                           currentTeacher={currentTeacher}
                           subjectCatalog={subjectCatalog}
                           teacherCatalog={teacherCatalog}
-                          teacherSubjectMap={teacherSubjectMap}
                           isHighlighted={isHighlighted}
                           isDimmed={isDimmed}
                           isEditable={isEditable}

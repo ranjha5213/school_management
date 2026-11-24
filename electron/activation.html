@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Activate License — School Management System</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f4f6f9;
+      color: #1f2937;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+    }
+    .card {
+      background: #fff;
+      padding: 28px;
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+      width: 100%;
+      max-width: 440px;
+    }
+    h1 { font-size: 20px; margin: 0 0 8px; }
+    p { font-size: 14px; color: #4b5563; margin: 0 0 18px; }
+    textarea {
+      width: 100%;
+      height: 84px;
+      padding: 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 13px;
+      box-sizing: border-box;
+    }
+    button {
+      margin-top: 14px;
+      width: 100%;
+      padding: 10px 16px;
+      background: #1d4ed8;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 15px;
+      cursor: pointer;
+    }
+    button:hover { background: #1e40af; }
+    .msg { margin-top: 12px; font-size: 13px; min-height: 18px; }
+    .err { color: #b91c1c; }
+    .ok { color: #15803d; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>License Activation</h1>
+    <p>Enter your School Management System license key to unlock offline access.</p>
+    <textarea id="keyInput" placeholder="SM1-..."></textarea>
+    <button id="activateBtn" type="button">Activate License</button>
+    <div id="msg" class="msg"></div>
+  </div>
+
+  <script>
+    const btn = document.getElementById("activateBtn");
+    const input = document.getElementById("keyInput");
+    const msg = document.getElementById("msg");
+
+    btn.addEventListener("click", async () => {
+      msg.className = "msg";
+      msg.textContent = "Verifying...";
+      const res = await window.schoolLicense.activate(input.value);
+      if (res.valid) {
+        msg.className = "msg ok";
+        msg.textContent = `Activated for ${res.org} (${res.expires}). Launching...`;
+      } else {
+        msg.className = "msg err";
+        msg.textContent = res.reason || "Activation failed.";
+      }
+    });
+  </script>
+</body>
+</html>
+

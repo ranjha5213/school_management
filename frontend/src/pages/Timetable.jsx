@@ -1,13 +1,15 @@
 // src/pages/Timetable.jsx
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, CalendarDays, Layers, Settings } from 'lucide-react';
+import { AlertCircle, ArrowRight, CalendarDays, Layers, Settings } from 'lucide-react';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import Loader from '../components/Loader';
 import Empty from '../components/Empty';
 import { classesApi } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
+
+const normalizeList = (res) => (Array.isArray(res) ? res : res?.data ?? []);
 
 export default function Timetable() {
   const navigate = useNavigate();
@@ -17,32 +19,48 @@ export default function Timetable() {
   const [classes, setClasses] = useState([]);
   const [sectionsByClass, setSectionsByClass] = useState({});
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
+
     async function load() {
+      setLoading(true);
+      setError(null);
+
       try {
-        const clsList = await classesApi.list().then((d) => (Array.isArray(d) ? d : d?.data || []));
+        const rawClasses = await classesApi.list();
+        const clsList = normalizeList(rawClasses);
         if (cancelled) return;
+
         setClasses(clsList);
 
         const secEntries = await Promise.all(
           clsList.map(async (c) => {
-            const cId = c.id || c.class_id;
-            const secs = await classesApi
-              .sections(cId)
-              .then((d) => (Array.isArray(d) ? d : d?.data || []))
-              .catch(() => []);
-            return [String(cId), secs];
+            const cId = c.id ?? c.class_id;
+            try {
+              const rawSecs = await classesApi.sections(cId);
+              return [String(cId), normalizeList(rawSecs)];
+            } catch {
+              return [String(cId), []];
+            }
           })
         );
+
         if (!cancelled) {
           setSectionsByClass(Object.fromEntries(secEntries));
         }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err?.message || 'Failed to load timetable classes.');
+        }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
+
     load();
     return () => {
       cancelled = true;
@@ -78,21 +96,31 @@ export default function Timetable() {
         </div>
       </div>
 
-      {classes.length === 0 ? (
+      {error ? (
+        <Card className="p-4 border-red-200 dark:border-red-900/60">
+          <div className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        </Card>
+      ) : classes.length === 0 ? (
         <Empty title="No classes found" />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {classes.map((cls) => {
-            const cId = cls.id || cls.class_id;
-            const secs = sectionsByClass[String(cId)] || [];
+            const cId = cls.id ?? cls.class_id;
+            const secs = sectionsByClass[String(cId)] ?? [];
+
             return (
               <Card key={cId} className="p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <h2 className="font-semibold text-sm flex items-center gap-1.5">
                     <Layers className="w-4 h-4 text-brand-600" />
-                    {cls.class_name || cls.name}
+                    {cls.class_name ?? cls.name}
                   </h2>
-                  <span className="text-xs text-slate-500">{secs.length} section(s)</span>
+                  <span className="text-xs text-slate-500">
+                    {secs.length} {secs.length === 1 ? 'section' : 'sections'}
+                  </span>
                 </div>
 
                 {secs.length === 0 ? (
@@ -100,7 +128,7 @@ export default function Timetable() {
                 ) : (
                   <div className="flex flex-wrap gap-2">
                     {secs.map((sec) => {
-                      const sId = sec.id || sec.section_id;
+                      const sId = sec.id ?? sec.section_id;
                       return (
                         <button
                           key={sId}
@@ -108,9 +136,9 @@ export default function Timetable() {
                           onClick={() =>
                             navigate(`/timetable/grid?class=${cId}&section=${sId}`)
                           }
-                          className="px-3 py-1.5 rounded-md text-xs font-medium bg-slate-100 hover:bg-brand-100 hover:text-brand-800 dark:bg-slate-800 dark:hover:bg-brand-900/40 border border-slate-200 dark:border-slate-700 transition-colors"
+                          className="px-3 py-1.5 rounded-md text-xs font-medium bg-slate-100 hover:bg-brand-100 hover:text-brand-800 dark:bg-slate-800 dark:hover:bg-brand-900/40 dark:hover:text-brand-200 border border-slate-200 dark:border-slate-700 transition-colors"
                         >
-                          Section {sec.section_name || sec.name}
+                          Section {sec.section_name ?? sec.name}
                         </button>
                       );
                     })}

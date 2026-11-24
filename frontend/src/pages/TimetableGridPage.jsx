@@ -1,35 +1,33 @@
 // src/pages/TimetableGridPage.jsx
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
   AlertTriangle,
-  BookOpen,
   CheckCircle2,
   Copy,
   Eye,
-  Filter,
   RotateCcw,
   Settings,
   User,
-  X,
+  BookOpen,
 } from 'lucide-react';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import Loader from '../components/Loader';
 import PrintHeader from '../components/PrintHeader';
 import PrintShare from '../components/PrintShare';
-import TimetableGrid, { fmtTime, periodKey } from '../components/TimetableGrid';
-import {
-  DEFAULT_PERIODS,
-  DEFAULT_FRIDAY_PERIODS,
-  parseJsonSetting,
-} from './TimetableSettings';
+import TimetableGrid, { periodKey } from '../components/TimetableGrid';
+import { parseJsonSetting } from './TimetableSettings';
 import api from '../api/client';
-import { classesApi, settingsApi,  teachersApi, timetableApi } from '../api/endpoints';
+import { classesApi, settingsApi, teachersApi, timetableApi } from '../api/endpoints';
 import { useAuth } from '../context/AuthContext';
 
 const OTHER_DAYS = ['Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const NO_PERIODS_MSG = 'You have not entered periods yet.';
+const TIME_12H_REGEX = /^(0?[1-9]|1[0-2]):([0-5]\d)\s*(AM|PM)$/i;
+const TIME_24H_REGEX = /^([01]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
+
 const WEEK_DAYS = [
   { key: 'monday', short: 'Mon' },
   { key: 'tuesday', short: 'Tue' },
@@ -39,19 +37,196 @@ const WEEK_DAYS = [
   { key: 'saturday', short: 'Sat' },
 ];
 
+const toText = (val) => {
+  if (val === null || val === undefined) return '';
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number' || typeof val === 'boolean') return String(val);
+  if (typeof val === 'object') {
+    return String(val.name || val.teacher_name || val.subject_name || val.full_name || '');
+  }
+  return '';
+};
+
+// ─── Time format normalizer ───
+// Backend now returns "HH:MM:SS". UI period keys are "HH:MM".
+// This makes both sides agree.
+const toHHMM = (s) => {
+  if (!s) return s;
+  const m = String(s).match(/^(\d{1,2}):(\d{2})/);
+  return m ? `${String(Number(m[1])).padStart(2, '0')}:${m[2]}` : s;
+};
+
+// ─── Row normalizer ───
+// - Normalizes start_time / end_time to HH:MM
+// - Adds nested `teacher` / `subject` objects (keeps flat fields too)
+const normalizeSlot = (r) => {
+  if (!r || typeof r !== 'object') return r;
+  return {
+    ...r,
+    start_time: toHHMM(r.start_time),
+    end_time: toHHMM(r.end_time),
+    teacher:
+      r.teacher_id != null
+        ? {
+            id: Number(r.teacher_id),
+            name: toText(r.teacher_name),
+            code: toText(r.employee_code),
+          }
+        : r.teacher ?? null,
+    subject:
+      r.subject_id != null
+        ? {
+            id: Number(r.subject_id),
+            name: toText(r.subject_name),
+            code: toText(r.subject_code),
+          }
+        : r.subject ?? null,
+  };
+};
+
 const asArray = (d) => {
   if (Array.isArray(d)) return d;
   if (!d) return [];
-  for (const k of ['data', 'slots', 'rows', 'subjects', 'teachers', 'items']) {
+  for (const k of ['data', 'slots', 'rows', 'subjects', 'teachers']) {
     if (Array.isArray(d[k])) return d[k];
   }
   return [];
 };
 
-const cellKey = (day, pIdx) => `${String(day).toLowerCase()}::${Number(pIdx)}`;
+const extractClassOrderNumber = (label) => {
+  const match = String(label || '').match(/\d+/);
+  return match ? Number(match[0]) : Number.POSITIVE_INFINITY;
+};
 
-const normalizeText = (name) => String(name || '').trim().toLowerCase();
+const compareClassRows = (a, b) => {
+  const numA = extractClassOrderNumber(a?.className ?? a?.class_name ?? a?.name);
+  const numB = extractClassOrderNumber(b?.className ?? b?.class_name ?? b?.name);
+  if (numA !== numB) return numA - numB;
+
+  const nameA = String(a?.className ?? a?.class_name ?? a?.name ?? '');
+  const nameB = String(b?.className ?? b?.class_name ?? b?.name ?? '');
+  const byName = nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+  if (byName !== 0) return byName;
+
+  const secA = String(a?.sectionName ?? a?.section_name ?? a?.name ?? '');
+  const secB = String(b?.sectionName ?? b?.section_name ?? b?.name ?? '');
+  return secA.localeCompare(secB, undefined, { numeric: true, sensitivity: 'base' });
+};
+
+const mergeById = (primary, secondary, idKeys = ['id', 'subject_id', 'teacher_id']) => {
+  const seen = new Set();
+  const out = [];
+  for (const item of [...(primary || []), ...(secondary || [])]) {
+    if (!item || typeof item !== 'object') continue;
+    const rawId = idKeys.map((k) => item[k]).find((v) => v !== undefined && v !== null);
+    const key = rawId !== undefined ? `id:${String(rawId)}` : JSON.stringify(item);
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(item);
+    }
+  }
+  return out;
+};
+
+const cellKey = (day, pIdx) => `${String(day).toLowerCase()}:${pIdx}`;
+
+const normalizeText = (name) => toText(name).trim().toLowerCase();
 const normalizeTeacher = normalizeText;
+
+const parseTimeToMinutes = (val) => {
+  if (!val) return null;
+  const str = String(val).trim();
+
+  const m12 = str.toUpperCase().match(TIME_12H_REGEX);
+  if (m12) {
+    let h = Number(m12[1]);
+    const mins = Number(m12[2]);
+    const meridian = m12[3];
+    if (meridian === 'AM' && h === 12) h = 0;
+    if (meridian === 'PM' && h !== 12) h += 12;
+    return h * 60 + mins;
+  }
+
+  const m24 = str.match(TIME_24H_REGEX);
+  if (!m24) return null;
+  const hours = Number(m24[1]);
+  const mins = Number(m24[2]);
+  if (Number.isNaN(hours) || Number.isNaN(mins) || hours > 23 || mins > 59) return null;
+  return hours * 60 + mins;
+};
+
+const to24HourTime = (val) => {
+  if (!val) return '';
+  const str = String(val).trim();
+
+  const m12 = str.toUpperCase().match(TIME_12H_REGEX);
+  if (m12) {
+    let h = Number(m12[1]);
+    const mins = m12[2];
+    const meridian = m12[3];
+    if (meridian === 'AM' && h === 12) h = 0;
+    if (meridian === 'PM' && h !== 12) h += 12;
+    return `${String(h).padStart(2, '0')}:${mins}:00`;
+  }
+
+  const m24 = str.match(TIME_24H_REGEX);
+  if (m24) {
+    const h = String(Number(m24[1])).padStart(2, '0');
+    const mins = m24[2];
+    const sec = m24[3] || '00';
+    return `${h}:${mins}:${sec}`;
+  }
+
+  return '';
+};
+
+const timeRangesOverlap = (aStart, aEnd, bStart, bEnd) => {
+  const s1 = parseTimeToMinutes(aStart);
+  const e1 = parseTimeToMinutes(aEnd);
+  const s2 = parseTimeToMinutes(bStart);
+  const e2 = parseTimeToMinutes(bEnd);
+
+  if (s1 !== null && e1 !== null && s2 !== null && e2 !== null) {
+    return s1 < e2 && e1 > s2;
+  }
+
+  const k1 = periodKey(aStart);
+  const k2 = periodKey(bStart);
+  return Boolean(k1 && k2 && k1 === k2);
+};
+
+const findMatchingSectionSlot = (slotList, day, period, pIdx, existingSlot = null) => {
+  if (!Array.isArray(slotList) || !slotList.length) return null;
+
+  if (existingSlot?.id) {
+    const byId = slotList.find((s) => s.id === existingSlot.id);
+    if (byId) return byId;
+  }
+
+  const targetDay = String(day || '').trim().toLowerCase();
+  const dayMatches = slotList.filter(
+    (s) => String(s.day_of_week || '').trim().toLowerCase() === targetDay
+  );
+  if (!dayMatches.length) return null;
+
+  const exact = dayMatches.find(
+    (s) =>
+      Number(s.period_index) === Number(pIdx) ||
+      (period?.start_time && toHHMM(s.start_time) === toHHMM(period.start_time)) ||
+      (period?.name && s.period_name === period.name)
+  );
+  if (exact) return exact;
+
+  if (period?.start_time && period?.end_time) {
+    return (
+      dayMatches.find((s) =>
+        timeRangesOverlap(period.start_time, period.end_time, s.start_time, s.end_time)
+      ) || null
+    );
+  }
+
+  return null;
+};
 
 function rankSuggestions(query, list) {
   const q = normalizeText(query);
@@ -95,21 +270,54 @@ const resolveId = (
 };
 
 const extractApiError = (err) => {
+  const status = err?.response?.status ?? err?.status ?? null;
   const data = err?.response?.data;
-  if (typeof data === 'string' && data.trim()) return data.trim();
+
   if (data && typeof data === 'object') {
+    const conflict = data.conflict;
+    const conflictWindow =
+      conflict && (conflict.start_time || conflict.end_time)
+        ? ` (${conflict.start_time || '?'}–${conflict.end_time || '?'}${
+            conflict.id ? `, slot #${conflict.id}` : ''
+          })`
+        : '';
+
     if (Array.isArray(data.errors) && data.errors.length) {
-      return data.errors
+      const joined = data.errors
         .map((item) =>
           typeof item === 'string'
             ? item
             : item?.message || item?.msg || JSON.stringify(item)
         )
         .join('; ');
+      return `${joined}${conflictWindow}`;
     }
-    return data.message || data.error || data.msg || JSON.stringify(data);
+
+    const baseMsg = data.message || data.error || data.msg;
+    if (baseMsg) return `${baseMsg}${conflictWindow}`;
   }
-  return err?.message || '400 Bad Request';
+
+  if (typeof data === 'string' && data.trim()) {
+    return data.trim();
+  }
+
+  if (status === 409) {
+    return 'This time slot overlaps with an existing slot in the timetable.';
+  }
+  if (status === 404) {
+    return 'The requested timetable slot or record was not found.';
+  }
+  if (status === 403) {
+    return 'You do not have permission to modify the timetable.';
+  }
+  if (status >= 500) {
+    return 'Server error while saving timetable. Please try again.';
+  }
+  if (!err?.response && err?.message === 'Network Error') {
+    return 'Network error: unable to reach the server. Check your connection.';
+  }
+
+  return err?.message || 'Unable to complete this timetable action.';
 };
 
 const logApiErrorDetails = (context, reason, meta = {}) => {
@@ -132,9 +340,7 @@ const formatSlotFailureLine = (reason, item) => {
     item?.period?.name ||
     (item?.pIdx !== undefined ? `Period ${Number(item.pIdx) + 1}` : 'Period');
   const slotInfo = [item?.subject_name, item?.teacher_name].filter(Boolean).join(' / ');
-  const target = slotInfo
-    ? `${dayLabel} · ${periodLabel} (${slotInfo})`
-    : `${dayLabel} · ${periodLabel}`;
+  const target = slotInfo ? `${dayLabel}, ${periodLabel} (${slotInfo})` : `${dayLabel}, ${periodLabel}`;
   return `• ${target}: ${detail}`;
 };
 
@@ -143,6 +349,10 @@ const samePeriodSlot = (a, b) => {
     String(a.day_of_week || '').trim().toLowerCase() ===
     String(b.day_of_week || '').trim().toLowerCase();
   if (!sameDay) return false;
+
+  if (a.start_time && a.end_time && b.start_time && b.end_time) {
+    return timeRangesOverlap(a.start_time, a.end_time, b.start_time, b.end_time);
+  }
 
   const tA = periodKey(a.start_time);
   const tB = periodKey(b.start_time);
@@ -163,15 +373,17 @@ const isSameRecord = (a, b) => {
 };
 
 const formatConflictMessage = (teacherName, day, startTime, periodName, clash, isSameSection) => {
-  const timeOrPeriod = periodKey(startTime) || periodName || 'Period';
+  const timeOrPeriod = toHHMM(startTime) || periodName || 'this period';
+  const dayCap = String(day || '').trim();
+  const formattedDay = dayCap ? dayCap.charAt(0).toUpperCase() + dayCap.slice(1) : 'Day';
   if (isSameSection) {
-    return `${teacherName} on ${day} (${timeOrPeriod}) is assigned more than once in this section`;
+    return `${teacherName} is assigned more than once in this section on ${formattedDay} (${timeOrPeriod}).`;
   }
   const where =
     [clash.class_name, clash.section_name && `Sec ${clash.section_name}`]
       .filter(Boolean)
       .join(' ') || `Section ${clash.section_id || '?'}`;
-  return `${teacherName} on ${day} (${timeOrPeriod}) is already booked in ${where}`;
+  return `${teacherName} is already teaching ${where} on ${formattedDay} (${timeOrPeriod}).`;
 };
 
 function groupAssignmentsForPeriod(sectionSlots, pIdx, regPeriod, friPeriod) {
@@ -185,7 +397,7 @@ function groupAssignmentsForPeriod(sectionSlots, pIdx, regPeriod, friPeriod) {
       const d = String(s.day_of_week || '').trim().toLowerCase();
       if (d !== dayMeta.key) return false;
       if (Number(s.period_index) === pIdx) return true;
-      if (targetP?.start_time && periodKey(s.start_time) === periodKey(targetP.start_time)) {
+      if (targetP?.start_time && toHHMM(s.start_time) === toHHMM(targetP.start_time)) {
         return true;
       }
       if (targetP?.name && s.period_name === targetP.name) return true;
@@ -194,13 +406,15 @@ function groupAssignmentsForPeriod(sectionSlots, pIdx, regPeriod, friPeriod) {
 
     if (!match) continue;
 
-    const subject = String(match.subject_name || match.subject || '—').trim();
-    const teacher = String(match.teacher_name || match.teacher || '—').trim();
+    const subject = String(match.subject_name || match.subject || match.subject_id || '').trim();
+    const teacher = toText(match.teacher_name || match.teacher).trim();
+    if (!subject && !teacher) continue;
+
     const groupKey = `${subject.toLowerCase()}||${teacher.toLowerCase()}`;
 
     if (!groups.has(groupKey)) {
       groups.set(groupKey, {
-        subject,
+        subject: subject || 'Subject',
         teacher,
         days: [],
       });
@@ -227,24 +441,34 @@ function FullTimetableMatrix({
   const sQuery = normalizeText(subjectFilter);
   const anyFilter = Boolean(tQuery || sQuery);
 
+  if (!cols.length) {
+    return (
+      <Card className="p-6 text-center">
+        <p className="text-sm font-medium text-amber-700 dark:text-amber-300">
+          {NO_PERIODS_MSG}
+        </p>
+      </Card>
+    );
+  }
+
   return (
-    <Card className="p-4 timetable-print print:p-2 print:shadow-none print:border-0 space-y-3">
+    <Card className="p-4 timetable-print print:p-2 print:shadow-none space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100">
             Full School Timetable (All Classes & Sections)
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Periods & timings along horizontal · Classes along vertical · Subject, Teacher & Days (Mon Tue Wed Thu Fri Sat) inside each cell
+            Periods along horizontal · Classes along vertical
           </p>
         </div>
       </div>
 
-      <div className="overflow-x-auto print:overflow-visible border border-slate-200 dark:border-slate-800 rounded-lg">
-        <table className="w-full text-left border-collapse min-w-[920px] print:min-w-0 text-xs">
+      <div className="overflow-x-auto print:overflow-visible">
+        <table className="w-full text-left border-collapse min-w-[780px] text-xs">
           <thead>
-            <tr className="bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200">
-              <th className="p-3 border-r border-slate-200 dark:border-slate-700 w-40 sticky left-0 print:static bg-slate-100 dark:bg-slate-800 z-10">
+            <tr className="bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
+              <th className="p-3 border-r border-slate-200 dark:border-slate-700">
                 Class / Section
               </th>
               {cols.map((p, idx) => {
@@ -252,22 +476,22 @@ function FullTimetableMatrix({
                 return (
                   <th
                     key={idx}
-                    className="p-2.5 border-r border-slate-200 dark:border-slate-700 text-center min-w-[180px] print:min-w-0"
+                    className="p-2.5 border-r border-slate-200 dark:border-slate-700 align-top"
                   >
                     <div className="font-bold">
                       P{idx + 1} · {p.name || `Period ${idx + 1}`}
                     </div>
-                    <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400 mt-0.5">
-                      Mon–Sat: {fmtTime(p.start_time)}–{fmtTime(p.end_time)}
+                    <div className="text-[10px] font-mono text-slate-500">
+                      Mon–Sat: {toHHMM(p.start_time)}–{toHHMM(p.end_time)}
                     </div>
                     {friP && !friP.isBreak && (
-                      <div className="text-[10px] font-mono text-amber-700 dark:text-amber-300 mt-0.5">
-                        Fri: {fmtTime(friP.start_time)}–{fmtTime(friP.end_time)}
+                      <div className="text-[10px] font-mono text-amber-700 dark:text-amber-300">
+                        Fri: {toHHMM(friP.start_time)}–{toHHMM(friP.end_time)}
                       </div>
                     )}
                     {friP?.isBreak && (
-                      <div className="text-[10px] font-semibold text-amber-700 dark:text-amber-300 mt-0.5">
-                        Fri Recess ({fmtTime(friP.start_time)}–{fmtTime(friP.end_time)})
+                      <div className="text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+                        Fri Recess ({toHHMM(friP.start_time)}–{toHHMM(friP.end_time)})
                       </div>
                     )}
                   </th>
@@ -282,14 +506,14 @@ function FullTimetableMatrix({
                 key={secRow.sectionId}
                 className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40"
               >
-                <td className="p-3 border-r border-slate-200 dark:border-slate-700 font-semibold sticky left-0 print:static bg-white dark:bg-slate-900 z-10">
+                <td className="p-3 border-r border-slate-200 dark:border-slate-700 font-semibold">
                   <button
                     type="button"
                     onClick={() => onSelectSection?.(secRow.classId, secRow.sectionId)}
-                    className="print:block text-left hover:text-brand-600 transition-colors"
+                    className="print:block text-left hover:text-brand-600"
                   >
                     <div className="text-slate-800 dark:text-slate-100">{secRow.className}</div>
-                    <div className="text-[11px] font-normal text-brand-600">
+                    <div className="text-[11px] font-normal text-slate-500">
                       Section {secRow.sectionName}
                     </div>
                   </button>
@@ -300,7 +524,7 @@ function FullTimetableMatrix({
                     return (
                       <td
                         key={pIdx}
-                        className="p-2 border-r border-slate-200 dark:border-slate-700 text-center align-middle bg-amber-50/70 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 font-semibold"
+                        className="p-2 border-r border-slate-200 dark:border-slate-700 bg-amber-50/60 dark:bg-amber-950/20 text-center text-[10px] font-semibold text-amber-700 dark:text-amber-300"
                       >
                         RECESS
                       </td>
@@ -314,7 +538,7 @@ function FullTimetableMatrix({
                     return (
                       <td
                         key={pIdx}
-                        className={`p-2 border-r border-slate-200 dark:border-slate-700 text-center align-middle text-slate-400 italic ${
+                        className={`p-2 border-r border-slate-200 dark:border-slate-700 text-center text-slate-400 ${
                           anyFilter ? 'opacity-35 print:opacity-100' : ''
                         }`}
                       >
@@ -335,11 +559,11 @@ function FullTimetableMatrix({
                   return (
                     <td
                       key={pIdx}
-                      className={`p-2 border-r border-slate-200 dark:border-slate-700 align-top transition-opacity ${
+                      className={`p-2 border-r border-slate-200 dark:border-slate-700 align-top ${
                         isDimmed
                           ? 'opacity-35 print:opacity-100'
                           : hasMatch
-                          ? 'bg-emerald-50/80 dark:bg-emerald-950/30'
+                          ? 'bg-emerald-50/80 dark:bg-emerald-950/25'
                           : ''
                       }`}
                     >
@@ -352,19 +576,21 @@ function FullTimetableMatrix({
                           return (
                             <div
                               key={idx}
-                              className={`rounded px-2 py-1 border leading-tight ${
+                              className={`rounded px-2 py-1 border border-slate-200/80 dark:border-slate-700/80 ${
                                 rowMatches
-                                  ? 'bg-emerald-100/80 dark:bg-emerald-900/40 border-emerald-400'
-                                  : 'bg-slate-50 dark:bg-slate-800/70 border-slate-200/80 dark:border-slate-700'
+                                  ? 'bg-emerald-100/80 dark:bg-emerald-900/40'
+                                  : 'bg-slate-50 dark:bg-slate-800/70'
                               }`}
                             >
-                              <div className="font-semibold text-brand-800 dark:text-brand-300 truncate print:whitespace-normal">
+                              <div className="font-semibold text-slate-800 dark:text-slate-100">
                                 {entry.subject}
                               </div>
-                              <div className="text-[11px] text-slate-700 dark:text-slate-200 truncate print:whitespace-normal">
-                                {entry.teacher}
-                              </div>
-                              <div className="text-[10px] font-medium text-amber-800 dark:text-amber-300 mt-0.5">
+                              {entry.teacher && (
+                                <div className="text-[11px] text-slate-600 dark:text-slate-300">
+                                  {entry.teacher}
+                                </div>
+                              )}
+                              <div className="text-[10px] font-mono text-slate-500">
                                 {entry.days.join(' ')}
                               </div>
                             </div>
@@ -414,11 +640,24 @@ export default function TimetableGridPage() {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const [periods, setPeriods] = useState(DEFAULT_PERIODS);
-  const [fridayPeriods, setFridayPeriods] = useState(DEFAULT_FRIDAY_PERIODS);
-  const [periodCount, setPeriodCount] = useState(DEFAULT_PERIODS.length);
-  const [fridayPeriodCount, setFridayPeriodCount] = useState(DEFAULT_FRIDAY_PERIODS.length);
+  const [periods, setPeriods] = useState([]);
+  const [fridayPeriods, setFridayPeriods] = useState([]);
+  const [periodCount, setPeriodCount] = useState(0);
+  const [fridayPeriodCount, setFridayPeriodCount] = useState(0);
   const [hiddenDays, setHiddenDays] = useState([]);
+
+  const blurTimerRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+    };
+  }, []);
+
+  const scheduleBlurClose = (setter) => {
+    if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+    blurTimerRef.current = setTimeout(() => setter(false), 120);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -431,16 +670,29 @@ export default function TimetableGridPage() {
       ]);
       if (cancelled) return;
 
-      const p = parseJsonSetting(rawP, DEFAULT_PERIODS);
-      const fp = parseJsonSetting(rawF, DEFAULT_FRIDAY_PERIODS);
+      const parsedP = parseJsonSetting(rawP, []);
+      const parsedF = parseJsonSetting(rawF, []);
       const hd = parseJsonSetting(rawH, []);
       const counts = parseJsonSetting(rawC, null);
+
+      const p = Array.isArray(parsedP) ? parsedP : [];
+      const fp = Array.isArray(parsedF) ? parsedF : [];
 
       setPeriods(p);
       setFridayPeriods(fp);
       setHiddenDays(Array.isArray(hd) ? hd : []);
-      setPeriodCount(Number(counts?.regular) || p.length);
-      setFridayPeriodCount(Number(counts?.friday) || fp.length);
+
+      const regCount =
+        counts?.regular !== undefined && counts?.regular !== null
+          ? Math.min(p.length, Math.max(0, Number(counts.regular) || 0))
+          : p.length;
+      const friCount =
+        counts?.friday !== undefined && counts?.friday !== null
+          ? Math.min(fp.length, Math.max(0, Number(counts.friday) || 0))
+          : fp.length;
+
+      setPeriodCount(regCount);
+      setFridayPeriodCount(friCount);
     }
     loadSettings();
     return () => {
@@ -449,15 +701,28 @@ export default function TimetableGridPage() {
   }, []);
 
   useEffect(() => {
-    classesApi.list().then((d) => setClasses(asArray(d))).catch(() => setClasses([]));
+    classesApi
+      .list()
+      .then((d) => setClasses([...asArray(d)].sort(compareClassRows)))
+      .catch((e) => {
+        logApiErrorDetails('loadClasses', e);
+        toast.error('Could not load classes list.');
+        setClasses([]);
+      });
     teachersApi
       .list()
       .then((d) => setAllCatalogTeachers(asArray(d)))
-      .catch(() => setAllCatalogTeachers([]));
-       api
+      .catch((e) => {
+        logApiErrorDetails('loadTeachersCatalog', e);
+        setAllCatalogTeachers([]);
+      });
+    api
       .get('/subjects')
       .then((r) => setAllCatalogSubjects(asArray(r.data)))
-      .catch(() => setAllCatalogSubjects([]));
+      .catch((e) => {
+        logApiErrorDetails('loadSubjectsCatalog', e);
+        setAllCatalogSubjects([]);
+      });
   }, []);
 
   useEffect(() => {
@@ -465,7 +730,14 @@ export default function TimetableGridPage() {
       setSections([]);
       return;
     }
-    classesApi.sections(classId).then((d) => setSections(asArray(d))).catch(() => setSections([]));
+    classesApi
+      .sections(classId)
+      .then((d) => setSections(asArray(d)))
+      .catch((e) => {
+        logApiErrorDetails('loadSections', e, { classId });
+        toast.error('Could not load sections for this class.');
+        setSections([]);
+      });
   }, [classId]);
 
   useEffect(() => {
@@ -473,8 +745,10 @@ export default function TimetableGridPage() {
     if (classId) next.set('class', classId);
     if (sectionId) next.set('section', sectionId);
     if (showFullTimetable) next.set('view', 'full');
-    setSearch(next, { replace: true });
-  }, [classId, sectionId, showFullTimetable, setSearch]);
+    if (next.toString() !== search.toString()) {
+      setSearch(next, { replace: true });
+    }
+  }, [classId, sectionId, showFullTimetable, search, setSearch]);
 
   useEffect(() => {
     if (!sectionId) {
@@ -495,31 +769,21 @@ export default function TimetableGridPage() {
           ? timetableApi.teachersForSection(sectionId)
           : api.get(`/timetable/teachers/${sectionId}`).then((r) => r.data);
 
-      const globalTeachersPromise = api
-        .get('/teachers')
-        .then((r) => r.data)
-        .catch(() => []);
-
-      const [subjRes, secTeachRes, globalTeachRes] = await Promise.all([
+      const [subjRes, secTeachRes] = await Promise.all([
         subjectPromise.catch(() => []),
         teacherPromise.catch(() => []),
-        globalTeachersPromise,
       ]);
       if (cancelled) return;
 
-      const secSubjs = asArray(subjRes);
-      const secTeachs = asArray(secTeachRes);
-      const pubTeachs = asArray(globalTeachRes);
-
-      setSectionSubjects(secSubjs);
-      setSectionTeachers(secTeachs.length ? secTeachs : pubTeachs);
+      setSectionSubjects(mergeById(asArray(subjRes), allCatalogSubjects));
+      setSectionTeachers(mergeById(asArray(secTeachRes), allCatalogTeachers));
     }
 
     loadSectionCatalogs();
     return () => {
       cancelled = true;
     };
-  }, [sectionId]);
+  }, [sectionId, allCatalogSubjects, allCatalogTeachers]);
 
   const loadSlots = useCallback(async () => {
     if (!sectionId) {
@@ -530,11 +794,11 @@ export default function TimetableGridPage() {
     setLoading(true);
     try {
       const data = await timetableApi.bySection(sectionId);
-      setSlots(asArray(data));
+      setSlots(asArray(data).map(normalizeSlot));
       setPendingEdits({});
     } catch (e) {
       logApiErrorDetails('loadSlots', e, { sectionId });
-      toast.error(extractApiError(e) || 'Failed to load timetable', { duration: 6000 });
+      toast.error(extractApiError(e), { duration: 6000 });
     } finally {
       setLoading(false);
     }
@@ -547,29 +811,30 @@ export default function TimetableGridPage() {
   const loadFullSchoolTimetable = useCallback(async () => {
     setFullLoading(true);
     try {
-      const allClasses = classes.length
+      const rawClasses = classes.length
         ? classes
         : asArray(await classesApi.list().catch(() => []));
+      const allClasses = [...rawClasses].sort(compareClassRows);
       const allSlots =
         typeof timetableApi.list === 'function'
-          ? asArray(await timetableApi.list().catch(() => []))
+          ? asArray(await timetableApi.list().catch(() => [])).map(normalizeSlot)
           : [];
 
       const matrixRows = [];
       for (const cls of allClasses) {
-        const cId = cls.id || cls.class_id;
+        const cId = cls.id ?? cls.class_id;
         if (!cId) continue;
-        const cName = cls.class_name || cls.name || `Class ${cId}`;
+        const cName = cls.class_name ?? cls.name ?? `Class ${cId}`;
         const secs = asArray(await classesApi.sections(cId).catch(() => []));
 
         for (const sec of secs) {
-          const sId = sec.id || sec.section_id;
+          const sId = sec.id ?? sec.section_id;
           if (!sId) continue;
-          const sName = sec.section_name || sec.name || String(sId);
+          const sName = sec.section_name ?? sec.name ?? String(sId);
 
           const secSlots = allSlots.length
             ? allSlots.filter((sl) => String(sl.section_id ?? '') === String(sId))
-            : asArray(await timetableApi.bySection(sId).catch(() => []));
+            : asArray(await timetableApi.bySection(sId).catch(() => [])).map(normalizeSlot);
 
           matrixRows.push({
             classId: String(cId),
@@ -580,7 +845,11 @@ export default function TimetableGridPage() {
           });
         }
       }
+      matrixRows.sort(compareClassRows);
       setFullRows(matrixRows);
+    } catch (e) {
+      logApiErrorDetails('loadFullSchoolTimetable', e);
+      toast.error('Could not load the full school timetable.');
     } finally {
       setFullLoading(false);
     }
@@ -592,7 +861,6 @@ export default function TimetableGridPage() {
     }
   }, [showFullTimetable, loadFullSchoolTimetable]);
 
-  // Ensure full matrix data is ready before window.print() fires
   useEffect(() => {
     const handleBeforePrint = () => {
       if (showFullTimetable && !fullRows.length) {
@@ -606,13 +874,13 @@ export default function TimetableGridPage() {
   const fullTeacherOptions = useMemo(() => {
     const map = new Map();
     for (const t of allCatalogTeachers) {
-      const name = String(t?.name || t?.teacher_name || t?.full_name || '').trim();
+      const name = toText(t?.name || t?.teacher_name || t?.full_name).trim();
       const key = normalizeText(name);
       if (key && !map.has(key)) map.set(key, { key, name });
     }
     for (const r of fullRows) {
       for (const sl of r.slots) {
-        const name = String(sl.teacher_name || sl.teacher || '').trim();
+        const name = toText(sl.teacher_name || sl.teacher).trim();
         const key = normalizeText(name);
         if (key && !map.has(key)) map.set(key, { key, name });
       }
@@ -623,13 +891,13 @@ export default function TimetableGridPage() {
   const fullSubjectOptions = useMemo(() => {
     const map = new Map();
     for (const s of allCatalogSubjects) {
-      const name = String(s?.subject_name || s?.name || s?.title || '').trim();
+      const name = toText(s?.subject_name || s?.name || s?.title).trim();
       const key = normalizeText(name);
       if (key && !map.has(key)) map.set(key, { key, name });
     }
     for (const r of fullRows) {
       for (const sl of r.slots) {
-        const name = String(sl.subject_name || sl.subject || '').trim();
+        const name = toText(sl.subject_name || sl.subject).trim();
         const key = normalizeText(name);
         if (key && !map.has(key)) map.set(key, { key, name });
       }
@@ -656,11 +924,11 @@ export default function TimetableGridPage() {
       if (!sectionId) return [];
 
       if (typeof timetableApi.list === 'function') {
-        const all = asArray(await timetableApi.list().catch(() => []));
+        const all = asArray(await timetableApi.list().catch(() => [])).map(normalizeSlot);
         return all.filter((s) => String(s.section_id ?? '') !== String(sectionId));
       }
       if (typeof timetableApi.all === 'function') {
-        const all = asArray(await timetableApi.all().catch(() => []));
+        const all = asArray(await timetableApi.all().catch(() => [])).map(normalizeSlot);
         return all.filter((s) => String(s.section_id ?? '') !== String(sectionId));
       }
 
@@ -670,13 +938,15 @@ export default function TimetableGridPage() {
       const collected = [];
 
       for (const cls of allClasses) {
-        const cId = cls.id || cls.class_id;
+        const cId = cls.id ?? cls.class_id;
         if (!cId) continue;
         const secs = asArray(await classesApi.sections(cId).catch(() => []));
         for (const sec of secs) {
-          const sId = sec.id || sec.section_id;
+          const sId = sec.id ?? sec.section_id;
           if (!sId || String(sId) === String(sectionId)) continue;
-          const secSlots = asArray(await timetableApi.bySection(sId).catch(() => []));
+          const secSlots = asArray(await timetableApi.bySection(sId).catch(() => [])).map(
+            normalizeSlot
+          );
           for (const sl of secSlots) {
             collected.push({
               ...sl,
@@ -692,12 +962,25 @@ export default function TimetableGridPage() {
     [classes, sectionId]
   );
 
-  useEffect(() => {
+  const refreshOtherSectionSlots = useCallback(async () => {
     if (!sectionId) {
       setOtherSectionSlots([]);
       return;
     }
+    try {
+      const rows = await fetchOtherSectionSlots(classes);
+      setOtherSectionSlots(rows);
+    } catch {
+      setOtherSectionSlots([]);
+    }
+  }, [sectionId, classes, fetchOtherSectionSlots]);
+
+  useEffect(() => {
     let cancelled = false;
+    if (!sectionId) {
+      setOtherSectionSlots([]);
+      return;
+    }
     fetchOtherSectionSlots(classes)
       .then((rows) => {
         if (!cancelled) setOtherSectionSlots(rows);
@@ -715,13 +998,13 @@ export default function TimetableGridPage() {
   const handleDiscardEdits = () => {
     if (!pendingCount) return;
     setPendingEdits({});
-    toast('Unsaved edits discarded');
+    toast('Unsaved changes discarded.');
   };
 
   const confirmDiscardPending = (nextActionLabel) => {
     if (!pendingCount) return true;
     return window.confirm(
-      `You have ${pendingCount} unsaved change(s). Discard them and ${nextActionLabel}?`
+      `You have ${pendingCount} unsaved change(s). Discard them before you ${nextActionLabel}?`
     );
   };
 
@@ -750,10 +1033,20 @@ export default function TimetableGridPage() {
       const idx = merged.findIndex(
         (s) =>
           (edit.existingSlot?.id && s.id === edit.existingSlot.id) ||
-          (String(s.day_of_week || '').toLowerCase() === edit.day.toLowerCase() &&
+          (String(s.day_of_week || '').toLowerCase() === String(edit.day || '').toLowerCase() &&
             (Number(s.period_index) === Number(edit.pIdx) ||
-              periodKey(s.start_time) === periodKey(edit.period.start_time)))
+              (edit.period?.start_time &&
+                edit.period?.end_time &&
+                timeRangesOverlap(
+                  edit.period.start_time,
+                  edit.period.end_time,
+                  s.start_time,
+                  s.end_time
+                ))))
       );
+
+      const safeSubjectName = toText(edit.subject_name);
+      const safeTeacherName = toText(edit.teacher_name);
 
       const updatedRow = {
         ...(edit.existingSlot || {}),
@@ -761,12 +1054,30 @@ export default function TimetableGridPage() {
         _cellKey: cellKey(edit.day, edit.pIdx),
         section_id: Number(sectionId),
         day_of_week: String(edit.day || '').toLowerCase(),
-        start_time: edit.period.start_time,
-        end_time: edit.period.end_time,
-        period_name: edit.period.name,
+        start_time: toHHMM(
+          to24HourTime(edit.period?.start_time ?? edit.existingSlot?.start_time ?? '')
+        ),
+        end_time: toHHMM(
+          to24HourTime(edit.period?.end_time ?? edit.existingSlot?.end_time ?? '')
+        ),
+        period_name: edit.period?.name ?? edit.existingSlot?.period_name ?? '',
         period_index: edit.pIdx,
-        subject_name: edit.subject_name,
-        teacher_name: edit.teacher_name,
+        subject_name: safeSubjectName,
+        teacher_name: safeTeacherName,
+        teacher:
+          edit.existingSlot?.teacher_id != null || safeTeacherName
+            ? {
+                id: edit.existingSlot?.teacher_id ?? null,
+                name: safeTeacherName,
+              }
+            : edit.existingSlot?.teacher ?? null,
+        subject:
+          edit.existingSlot?.subject_id != null || safeSubjectName
+            ? {
+                id: edit.existingSlot?.subject_id ?? null,
+                name: safeSubjectName,
+              }
+            : edit.existingSlot?.subject ?? null,
       };
 
       if (idx >= 0) {
@@ -780,18 +1091,20 @@ export default function TimetableGridPage() {
 
   const liveConflicts = useMemo(() => {
     if (!sectionId) return [];
-
     const seen = new Set();
     const list = [];
 
     for (const slot of effectiveSlots) {
-      const rawTeacher = (slot.teacher_name || slot.teacher || '').trim();
+      if (!slot) continue;
+      const rawTeacher = toText(slot.teacher_name || slot.teacher).trim();
       const normTeacher = normalizeTeacher(rawTeacher);
       if (!normTeacher) continue;
 
       const otherClash = otherSectionSlots.find((other) => {
+        if (!other) return false;
         if (slot.id && other.id === slot.id) return false;
-        if (normalizeTeacher(other.teacher_name || other.teacher) !== normTeacher) return false;
+        const otherTeacher = toText(other.teacher_name || other.teacher).trim();
+        if (normalizeTeacher(otherTeacher) !== normTeacher) return false;
         return samePeriodSlot(slot, other);
       });
 
@@ -804,15 +1117,16 @@ export default function TimetableGridPage() {
           otherClash,
           false
         );
-        if (!seen.has(msg)) {
+        if (msg && !seen.has(msg)) {
           seen.add(msg);
           list.push(msg);
         }
       }
 
       const sameSectionClash = effectiveSlots.find((peer) => {
-        if (isSameRecord(slot, peer)) return false;
-        if (normalizeTeacher(peer.teacher_name || peer.teacher) !== normTeacher) return false;
+        if (!peer || isSameRecord(slot, peer)) return false;
+        const peerTeacher = toText(peer.teacher_name || peer.teacher).trim();
+        if (normalizeTeacher(peerTeacher) !== normTeacher) return false;
         return samePeriodSlot(slot, peer);
       });
 
@@ -825,7 +1139,7 @@ export default function TimetableGridPage() {
           sameSectionClash,
           true
         );
-        if (!seen.has(msg)) {
+        if (msg && !seen.has(msg)) {
           seen.add(msg);
           list.push(msg);
         }
@@ -841,11 +1155,12 @@ export default function TimetableGridPage() {
       .map((e) => ({
         _cellKey: cellKey(e.day, e.pIdx),
         day_of_week: String(e.day || '').toLowerCase(),
-        start_time: e.period.start_time,
+        start_time: to24HourTime(e.period?.start_time ?? e.existingSlot?.start_time ?? ''),
+        end_time: to24HourTime(e.period?.end_time ?? e.existingSlot?.end_time ?? ''),
         period_index: e.pIdx,
-        period_name: e.period.name,
-        teacher_name: e.teacher_name.trim(),
-        subject_name: e.subject_name.trim(),
+        period_name: e.period?.name ?? e.existingSlot?.period_name ?? '',
+        teacher_name: toText(e.teacher_name).trim(),
+        subject_name: toText(e.subject_name).trim(),
         existingId: e.existingSlot?.id,
       }));
 
@@ -920,37 +1235,58 @@ export default function TimetableGridPage() {
   };
 
   const buildSlotPayload = (targetSectionId, day, period, existing, subjectVal, teacherVal) => {
-    const hasSubjectInput =
-      subjectVal !== undefined && subjectVal !== null && String(subjectVal).trim() !== '';
-    const hasTeacherInput =
-      teacherVal !== undefined && teacherVal !== null && String(teacherVal).trim() !== '';
+    const cleanSubject = toText(subjectVal).trim();
+    const cleanTeacher = toText(teacherVal).trim();
+    const hasSubjectInput = cleanSubject !== '';
+    const hasTeacherInput = cleanTeacher !== '';
 
     const resolvedSubjectId = hasSubjectInput
-      ? resolveId(sectionSubjects, subjectVal, ['name', 'subject_name', 'title'])
+      ? resolveId(sectionSubjects, cleanSubject, ['name', 'subject_name', 'title'])
       : existing?.subject_id ?? null;
 
     const resolvedTeacherId = hasTeacherInput
-      ? resolveId(sectionTeachers, teacherVal, ['name', 'teacher_name', 'full_name'])
-      : existing?.teacher_id ?? null;
+      ? resolveId(sectionTeachers, cleanTeacher, ['name', 'teacher_name', 'full_name'])
+      : null;
+
+    const rawStart = period?.start_time ?? existing?.start_time ?? '';
+    const rawEnd = period?.end_time ?? existing?.end_time ?? '';
 
     return {
       section_id: Number(targetSectionId),
       subject_id: resolvedSubjectId ? Number(resolvedSubjectId) : null,
       teacher_id: resolvedTeacherId ? Number(resolvedTeacherId) : null,
       day_of_week: String(day || '').trim().toLowerCase(),
-      start_time: period?.start_time ?? existing?.start_time ?? '',
-      end_time: period?.end_time ?? existing?.end_time ?? '',
+      start_time: to24HourTime(rawStart),
+      end_time: to24HourTime(rawEnd),
       _hasSubjectInput: hasSubjectInput,
       _hasTeacherInput: hasTeacherInput,
     };
   };
 
-  const saveSlot = async (targetSectionId, day, period, pIdx, existing, subject, teacher) => {
-    const built = buildSlotPayload(targetSectionId, day, period, existing, subject, teacher);
+  const saveSlot = async (
+    targetSectionId,
+    day,
+    period,
+    pIdx,
+    existing,
+    subject,
+    teacher
+  ) => {
+    const resolvedExisting =
+      existing || findMatchingSectionSlot(slots, day, period, pIdx, existing);
+
+    const built = buildSlotPayload(
+      targetSectionId,
+      day,
+      period,
+      resolvedExisting,
+      subject,
+      teacher
+    );
     const { _hasSubjectInput, _hasTeacherInput, ...payload } = built;
 
-    if (existing?.id && !payload.subject_id && !_hasSubjectInput && !_hasTeacherInput) {
-      await timetableApi.remove(existing.id);
+    if (resolvedExisting?.id && !payload.subject_id && !_hasSubjectInput) {
+      await timetableApi.remove(resolvedExisting.id);
       return;
     }
 
@@ -965,21 +1301,29 @@ export default function TimetableGridPage() {
       !payload.start_time ||
       !payload.end_time
     ) {
-      const missing = [];
-      if (!payload.section_id) missing.push('section_id');
-      if (!payload.subject_id) missing.push(`subject_id (from "${subject ?? ''}")`);
-      if (!payload.day_of_week) missing.push('day_of_week');
-      if (!payload.start_time) missing.push('start_time');
-      if (!payload.end_time) missing.push('end_time');
-      throw new Error(`Invalid/missing required field(s): ${missing.join(', ')}`);
+      const missingLabels = [];
+      if (!payload.section_id) missingLabels.push('section');
+      if (!payload.subject_id) {
+        missingLabels.push(
+          toText(subject).trim()
+            ? `valid subject ("${toText(subject).trim()}" not found)`
+            : 'subject'
+        );
+      }
+      if (!payload.day_of_week) missingLabels.push('day');
+      if (!payload.start_time) missingLabels.push('valid 12h/24h start time');
+      if (!payload.end_time) missingLabels.push('valid 12h/24h end time');
+      throw new Error(`Please select a ${missingLabels.join(', ')}.`);
     }
 
     if (_hasTeacherInput && !payload.teacher_id) {
-      throw new Error(`Unknown teacher "${teacher}" (could not resolve teacher_id)`);
+      throw new Error(
+        `Teacher "${toText(teacher).trim()}" was not found in the assigned teachers list.`
+      );
     }
 
-    if (existing?.id) {
-      await timetableApi.update(existing.id, payload);
+    if (resolvedExisting?.id) {
+      await timetableApi.update(resolvedExisting.id, payload);
     } else {
       await timetableApi.create(payload);
     }
@@ -1030,17 +1374,29 @@ export default function TimetableGridPage() {
       return;
     }
 
+    const resolvedExisting =
+      existingSlot || findMatchingSectionSlot(slots, day, period, pIdx, existingSlot);
+
     const key = cellKey(day, pIdx);
     const prevBuffered = pendingEdits[key];
-    const baseSubject =
-      prevBuffered?.subject_name ?? existingSlot?.subject_name ?? existingSlot?.subject ?? '';
-    const baseTeacher =
-      prevBuffered?.teacher_name ?? existingSlot?.teacher_name ?? existingSlot?.teacher ?? '';
+    const baseSubject = toText(
+      prevBuffered?.subject_name ??
+        resolvedExisting?.subject_name ??
+        resolvedExisting?.subject ??
+        ''
+    );
+    const baseTeacher = toText(
+      prevBuffered?.teacher_name ??
+        resolvedExisting?.teacher_name ??
+        resolvedExisting?.teacher ??
+        ''
+    );
 
+    const safeValue = toText(value);
     const nextSubject =
-      field === 'subject' || field === 'subject_name' ? value : baseSubject;
+      field === 'subject' || field === 'subject_name' ? safeValue : baseSubject;
     const nextTeacher =
-      field === 'teacher' || field === 'teacher_name' ? value : baseTeacher;
+      field === 'teacher' || field === 'teacher_name' ? safeValue : baseTeacher;
 
     setPendingEdits((prev) => ({
       ...prev,
@@ -1048,7 +1404,7 @@ export default function TimetableGridPage() {
         day,
         period,
         pIdx,
-        existingSlot: prevBuffered?.existingSlot ?? existingSlot,
+        existingSlot: prevBuffered?.existingSlot ?? resolvedExisting,
         subject_name: nextSubject,
         teacher_name: nextTeacher,
       },
@@ -1056,12 +1412,14 @@ export default function TimetableGridPage() {
   };
 
   const handleCopyMondaySlots = async () => {
-    if (!sectionId) return toast.error('Select a Class and Section first.');
+    if (!sectionId) return toast.error('Please select a Class and Section first.');
     if (busy) return;
+    if (!periods.length) return toast.error(NO_PERIODS_MSG);
+
     const monSlots = effectiveSlots.filter(
       (s) => String(s.day_of_week).toLowerCase() === 'monday'
     );
-    if (!monSlots.length) return toast.error('Enter Monday slots first before copying.');
+    if (!monSlots.length) return toast.error('Please add Monday slots first.');
 
     setBusy(true);
     try {
@@ -1071,7 +1429,8 @@ export default function TimetableGridPage() {
 
       for (const targetDay of OTHER_DAYS) {
         if (hiddenDays.includes(targetDay)) continue;
-        const targetList = targetDay === 'Friday' ? friPeriods : regPeriods;
+        const targetList =
+          targetDay === 'Friday' && friPeriods.length ? friPeriods : regPeriods;
 
         for (let pIdx = 0; pIdx < targetList.length; pIdx++) {
           const targetPeriod = targetList[pIdx];
@@ -1081,26 +1440,20 @@ export default function TimetableGridPage() {
           const src = monSlots.find(
             (m) =>
               m.period_index === pIdx ||
-              (monPeriod && periodKey(m.start_time) === periodKey(monPeriod.start_time)) ||
+              (monPeriod && toHHMM(m.start_time) === toHHMM(monPeriod.start_time)) ||
               (monPeriod && m.period_name === monPeriod.name)
           );
           if (!src) continue;
 
-          const dest = slots.find(
-            (t) =>
-              String(t.day_of_week || '').toLowerCase() === targetDay.toLowerCase() &&
-              (t.period_index === pIdx ||
-                periodKey(t.start_time) === periodKey(targetPeriod.start_time) ||
-                t.period_name === targetPeriod.name)
-          );
+          const dest = findMatchingSectionSlot(slots, targetDay, targetPeriod, pIdx);
 
           plannedCopies.push({
             day: targetDay,
             period: targetPeriod,
             pIdx,
             existingSlot: dest,
-            subject_name: src.subject_name ?? src.subject_id ?? '',
-            teacher_name: src.teacher_name ?? src.teacher_id ?? '',
+            subject_name: src.subject_name ?? src.subject_id,
+            teacher_name: src.teacher_name ?? src.teacher_id,
           });
         }
       }
@@ -1113,12 +1466,12 @@ export default function TimetableGridPage() {
       const conflicts = await findTeacherConflicts(plannedCopies);
       if (conflicts.length) {
         const proceed = window.confirm(
-          `Teacher conflict detected when copying Monday slots:\n\n• ${conflicts.join(
+          `Teacher clash detected while copying Monday slots:\n\n• ${conflicts.join(
             '\n• '
           )}\n\nCopy anyway?`
         );
         if (!proceed) {
-          toast.error('Copy cancelled due to teacher conflict.');
+          toast('Copy cancelled.');
           return;
         }
       }
@@ -1141,7 +1494,7 @@ export default function TimetableGridPage() {
         .map((result, idx) => ({ result, item: plannedCopies[idx] }))
         .filter(({ result }) => result.status === 'rejected');
 
-      await loadSlots();
+      await Promise.all([loadSlots(), refreshOtherSectionSlots()]);
 
       if (failedEntries.length) {
         const nextPending = {};
@@ -1160,33 +1513,35 @@ export default function TimetableGridPage() {
 
       if (failedCount && succeeded) {
         toast.error(
-          `Copied ${succeeded}, ${failedCount} failed:\n${lines.join('\n')}`,
+          `Copied ${succeeded} slot(s), but ${failedCount} could not be copied:\n${lines.join(
+            '\n'
+          )}`,
           { duration: 8000 }
         );
       } else if (failedCount) {
         toast.error(
-          `Copy failed for ${failedCount} slot(s):\n${lines.join('\n')}`,
+          `Could not copy ${failedCount} slot(s):\n${lines.join('\n')}`,
           { duration: 8000 }
         );
       } else {
-        toast.success('Monday slots copied to all other days!', { duration: 4000 });
+        toast.success('Monday slots copied to all other days!');
       }
     } catch (e) {
       logApiErrorDetails('handleCopyMondaySlots', e, { sectionId });
-      toast.error(extractApiError(e) || 'Failed to copy Monday slots', { duration: 8000 });
+      toast.error(extractApiError(e), { duration: 8000 });
     } finally {
       setBusy(false);
     }
   };
 
   const handleSubmit = async () => {
-    if (!sectionId) return toast.error('Select a Class and Section first.');
+    if (!sectionId) return toast.error('Please select a Class and Section first.');
     if (busy) return;
 
     const editsToSave = Object.values(pendingEdits);
     if (!editsToSave.length) {
-      await loadSlots();
-      toast.success('Timetable submitted!');
+      await Promise.all([loadSlots(), refreshOtherSectionSlots()]);
+      toast.success('Timetable is up to date!');
       return;
     }
 
@@ -1195,10 +1550,10 @@ export default function TimetableGridPage() {
       const conflicts = await findTeacherConflicts(editsToSave);
       if (conflicts.length) {
         const proceed = window.confirm(
-          `Teacher conflict detected:\n\n• ${conflicts.join('\n• ')}\n\nSubmit anyway?`
+          `Teacher clash detected:\n\n• ${conflicts.join('\n• ')}\n\nSave anyway?`
         );
         if (!proceed) {
-          toast.error('Submission cancelled due to teacher conflict.');
+          toast('Submission cancelled.');
           return;
         }
       }
@@ -1221,7 +1576,7 @@ export default function TimetableGridPage() {
         .map((result, idx) => ({ result, item: editsToSave[idx] }))
         .filter(({ result }) => result.status === 'rejected');
 
-      await loadSlots();
+      await Promise.all([loadSlots(), refreshOtherSectionSlots()]);
 
       if (failedEntries.length) {
         const nextPending = {};
@@ -1240,34 +1595,41 @@ export default function TimetableGridPage() {
 
       if (failedCount && succeeded) {
         toast.error(
-          `Saved ${succeeded}, ${failedCount} failed:\n${lines.join('\n')}`,
+          `Saved ${succeeded} slot(s), but ${failedCount} failed:\n${lines.join('\n')}`,
           { duration: 8000 }
         );
       } else if (failedCount) {
         toast.error(
-          `Failed to save ${failedCount} slot(s):\n${lines.join('\n')}`,
+          `Could not save ${failedCount} slot(s):\n${lines.join('\n')}`,
           { duration: 8000 }
         );
       } else {
-        toast.success(`Saved ${succeeded} slot update(s) and submitted timetable!`, {
+        toast.success(`Saved ${succeeded} slot update(s) successfully!`, {
           duration: 4000,
         });
       }
     } catch (e) {
       logApiErrorDetails('handleSubmit', e, { sectionId });
-      toast.error(extractApiError(e) || 'Failed to submit timetable', { duration: 8000 });
+      toast.error(extractApiError(e), { duration: 8000 });
     } finally {
       setBusy(false);
     }
   };
 
-  const printTitle = showFullTimetable ? 'Full School Timetable' : 'Class Timetable';
+  const printTitle = showFullTimetable
+    ? 'Full School Timetable'
+    : sectionId
+    ? `Section ${sectionId} Timetable`
+    : 'Timetable Grid';
+
+  const hasConfiguredPeriods = periods.length > 0;
 
   return (
     <div className="space-y-4 print-container timetable-print">
       <PrintHeader title={printTitle} />
 
       <div className="flex flex-wrap items-center justify-between gap-2 no-print">
+        <h1 className="text-lg font-semibold">Timetable Grid</h1>
         <div className="flex flex-wrap items-center gap-2">
           {isAdmin && (
             <>
@@ -1283,7 +1645,7 @@ export default function TimetableGridPage() {
                 size="sm"
                 variant="secondary"
                 icon={Copy}
-                disabled={!sectionId || busy || showFullTimetable}
+                disabled={!sectionId || busy || showFullTimetable || !hasConfiguredPeriods}
                 onClick={handleCopyMondaySlots}
               >
                 Copy Monday Slots to All Other Days
@@ -1291,7 +1653,7 @@ export default function TimetableGridPage() {
               <Button
                 size="sm"
                 icon={CheckCircle2}
-                disabled={!sectionId || busy || showFullTimetable}
+                disabled={!sectionId || busy || showFullTimetable || !hasConfiguredPeriods}
                 onClick={handleSubmit}
               >
                 {busy
@@ -1324,61 +1686,50 @@ export default function TimetableGridPage() {
           </Button>
 
           {pendingCount > 0 && (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-300 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-700">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
               <AlertTriangle className="w-3.5 h-3.5" />
               {pendingCount} unsaved edit{pendingCount > 1 ? 's' : ''}
             </span>
           )}
         </div>
-        <PrintShare title={printTitle} />
       </div>
+
+      <PrintShare title={printTitle} />
 
       {showFullTimetable ? (
         <div className="space-y-3">
           <Card className="p-3 space-y-2 no-print">
-            <div className="flex flex-wrap items-center gap-4">
-              {/* Full Timetable Teacher Filter */}
-              <div className="relative flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-4 text-xs">
+              <div className="relative flex items-center gap-1.5">
                 <User className="w-4 h-4 text-brand-600 shrink-0" />
-                <span className="text-xs font-semibold">Teacher:</span>
-                <div className="relative flex items-center gap-1">
+                <span className="font-semibold">Teacher:</span>
+                <div className="relative">
                   <input
                     type="text"
                     autoComplete="off"
                     placeholder="Type teacher name..."
+                    className="input py-1 text-xs w-44"
                     value={fullTeacherFilter}
                     onFocus={() => {
                       if (fullTeacherFilter.trim()) setShowFullTeacherSugg(true);
                     }}
-                    onBlur={() => setTimeout(() => setShowFullTeacherSugg(false), 120)}
+                    onBlur={() => scheduleBlurClose(setShowFullTeacherSugg)}
                     onChange={(e) => {
                       setFullTeacherFilter(e.target.value);
                       setShowFullTeacherSugg(Boolean(e.target.value.trim()));
                     }}
-                    className="input text-xs py-1 w-48"
                   />
-                  {fullTeacherFilter && (
-                    <button
-                      type="button"
-                      onClick={() => setFullTeacherFilter('')}
-                      className="p-1 text-slate-400 hover:text-slate-700 rounded"
-                      title="Clear teacher filter"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
                   {showFullTeacherSugg && fullTeacherSuggestions.length > 0 && (
-                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                    <div className="absolute z-20 mt-1 w-56 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded shadow-lg py-1">
                       {fullTeacherSuggestions.map((opt) => (
                         <button
                           key={opt.key}
                           type="button"
-                          onMouseDown={(e) => {
-                            e.preventDefault();
+                          onMouseDown={() => {
                             setFullTeacherFilter(opt.name);
                             setShowFullTeacherSugg(false);
                           }}
-                          className="w-full px-2.5 py-1.5 text-xs text-left font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 border-b last:border-b-0 border-slate-100 dark:border-slate-800"
+                          className="w-full text-left px-2.5 py-1 hover:bg-slate-100 dark:hover:bg-slate-700"
                         >
                           {opt.name}
                         </button>
@@ -1388,48 +1739,36 @@ export default function TimetableGridPage() {
                 </div>
               </div>
 
-              {/* Full Timetable Subject Filter */}
-              <div className="relative flex items-center gap-2">
+              <div className="relative flex items-center gap-1.5">
                 <BookOpen className="w-4 h-4 text-brand-600 shrink-0" />
-                <span className="text-xs font-semibold">Subject:</span>
-                <div className="relative flex items-center gap-1">
+                <span className="font-semibold">Subject:</span>
+                <div className="relative">
                   <input
                     type="text"
                     autoComplete="off"
                     placeholder="Type subject name..."
+                    className="input py-1 text-xs w-44"
                     value={fullSubjectFilter}
                     onFocus={() => {
                       if (fullSubjectFilter.trim()) setShowFullSubjectSugg(true);
                     }}
-                    onBlur={() => setTimeout(() => setShowFullSubjectSugg(false), 120)}
+                    onBlur={() => scheduleBlurClose(setShowFullSubjectSugg)}
                     onChange={(e) => {
                       setFullSubjectFilter(e.target.value);
                       setShowFullSubjectSugg(Boolean(e.target.value.trim()));
                     }}
-                    className="input text-xs py-1 w-48"
                   />
-                  {fullSubjectFilter && (
-                    <button
-                      type="button"
-                      onClick={() => setFullSubjectFilter('')}
-                      className="p-1 text-slate-400 hover:text-slate-700 rounded"
-                      title="Clear subject filter"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
                   {showFullSubjectSugg && fullSubjectSuggestions.length > 0 && (
-                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                    <div className="absolute z-20 mt-1 w-56 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded shadow-lg py-1">
                       {fullSubjectSuggestions.map((opt) => (
                         <button
                           key={opt.key}
                           type="button"
-                          onMouseDown={(e) => {
-                            e.preventDefault();
+                          onMouseDown={() => {
                             setFullSubjectFilter(opt.name);
                             setShowFullSubjectSugg(false);
                           }}
-                          className="w-full px-2.5 py-1.5 text-xs text-left font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 border-b last:border-b-0 border-slate-100 dark:border-slate-800"
+                          className="w-full text-left px-2.5 py-1 hover:bg-slate-100 dark:hover:bg-slate-700"
                         >
                           {opt.name}
                         </button>
@@ -1438,18 +1777,25 @@ export default function TimetableGridPage() {
                   )}
                 </div>
               </div>
+
+              {(fullTeacherFilter || fullSubjectFilter) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFullTeacherFilter('');
+                    setFullSubjectFilter('');
+                  }}
+                  className="text-xs text-slate-500 hover:text-slate-800 underline"
+                >
+                  Clear filters
+                </button>
+              )}
             </div>
 
-            {!hasFullTeacherMatch && (
-              <div className="text-xs font-semibold text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/35 border border-amber-300 dark:border-amber-700 rounded-md px-3 py-1.5">
-                Please add the teacher first.
-              </div>
-            )}
-
-            {!hasFullSubjectMatch && (
-              <div className="text-xs font-semibold text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/35 border border-amber-300 dark:border-amber-700 rounded-md px-3 py-1.5">
-                Please add the subject first.
-              </div>
+            {(!hasFullTeacherMatch || !hasFullSubjectMatch) && (
+              <p className="text-xs text-amber-700 dark:text-amber-300">
+                No matching timetable entries found for the current filter.
+              </p>
             )}
           </Card>
 
@@ -1473,44 +1819,41 @@ export default function TimetableGridPage() {
           )}
         </div>
       ) : (
-        <>
+        <div className="space-y-4">
           <Card className="p-4 no-print">
-            <div className="flex items-center gap-2 mb-2 text-sm font-semibold">
-              <Filter className="w-4 h-4 text-brand-600" /> Select Class & Section
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div>
-                <label className="label text-xs">Class</label>
+                <label className="label">Class</label>
                 <select
-                  className="input text-sm"
+                  className="input"
                   value={classId}
                   onChange={(e) => handleClassChange(e.target.value)}
                 >
-                  <option value="">Choose class</option>
+                  <option value="">Select class</option>
                   {classes.map((c) => {
-                    const id = c.id || c.class_id;
+                    const id = c.id ?? c.class_id;
                     return (
                       <option key={id} value={id}>
-                        {c.class_name || c.name}
+                        {c.class_name ?? c.name}
                       </option>
                     );
                   })}
                 </select>
               </div>
+
               <div>
-                <label className="label text-xs">Section</label>
+                <label className="label">Section</label>
                 <select
-                  className="input text-sm"
+                  className="input"
                   value={sectionId}
-                  disabled={!classId}
                   onChange={(e) => handleSectionChange(e.target.value)}
                 >
-                  <option value="">{classId ? 'Choose section' : 'Pick class first'}</option>
+                  <option value="">Select section</option>
                   {sections.map((s) => {
-                    const id = s.id || s.section_id;
+                    const id = s.id ?? s.section_id;
                     return (
                       <option key={id} value={id}>
-                        Section {s.section_name || s.name}
+                        Section {s.section_name ?? s.name}
                       </option>
                     );
                   })}
@@ -1519,43 +1862,56 @@ export default function TimetableGridPage() {
             </div>
           </Card>
 
-          {liveConflicts.length > 0 && (
-            <div
-              role="alert"
-              className="no-print rounded-lg border border-red-300 bg-red-50/90 dark:bg-red-950/35 dark:border-red-500/60 p-3.5 text-xs text-red-900 dark:text-red-200 space-y-1.5"
-            >
-              <div className="flex items-center gap-2 font-semibold text-sm text-red-800 dark:text-red-300">
-                <AlertTriangle className="w-4 h-4 shrink-0 text-red-600 dark:text-red-400" />
-                <span>
-                  {liveConflicts.length} Teacher Clash{liveConflicts.length > 1 ? 'es' : ''} Detected
-                </span>
-              </div>
-              <ul className="list-disc pl-6 space-y-0.5 text-red-800 dark:text-red-200">
-                {liveConflicts.map((msg, idx) => (
-                  <li key={idx}>{msg}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {loading ? (
+          {!hasConfiguredPeriods ? (
+            <Card className="p-6 text-center space-y-3">
+              <p className="text-sm font-medium text-amber-700 dark:text-amber-300">
+                {NO_PERIODS_MSG}
+              </p>
+              {isAdmin && (
+                <div>
+                  <Button
+                    size="sm"
+                    icon={Settings}
+                    onClick={() => navigate('/timetable/settings')}
+                  >
+                    Enter Periods in Settings
+                  </Button>
+                </div>
+              )}
+            </Card>
+          ) : loading ? (
             <Loader />
           ) : (
-            <TimetableGrid
-              timetable={effectiveSlots}
-              otherSectionSlots={otherSectionSlots}
-              subjects={sectionSubjects}
-              teachers={sectionTeachers}
-              periods={periods}
-              fridayPeriods={fridayPeriods}
-              periodCount={periodCount}
-              fridayPeriodCount={fridayPeriodCount}
-              hiddenDays={hiddenDays}
-              isEditable={isAdmin && Boolean(sectionId)}
-              onUpdateCell={handleUpdateCell}
-            />
+            <>
+              {liveConflicts.length > 0 && (
+                <Card className="p-3 border-amber-300 bg-amber-50/70 dark:bg-amber-950/25 no-print">
+                  <div className="text-xs font-semibold text-amber-800 dark:text-amber-200 mb-1">
+                    Teacher Schedule Conflicts Detected:
+                  </div>
+                  <ul className="list-disc list-inside text-xs text-amber-700 dark:text-amber-300 space-y-0.5">
+                    {liveConflicts.map((cMsg, i) => (
+                      <li key={i}>{cMsg}</li>
+                    ))}
+                  </ul>
+                </Card>
+              )}
+
+              <TimetableGrid
+                periods={periods}
+                fridayPeriods={fridayPeriods}
+                periodCount={periodCount}
+                fridayPeriodCount={fridayPeriodCount}
+                hiddenDays={hiddenDays}
+                timetable={effectiveSlots}
+                subjects={sectionSubjects}
+                teachers={sectionTeachers}
+                otherSectionSlots={otherSectionSlots}
+                isEditable={Boolean(sectionId)}
+                onUpdateCell={handleUpdateCell}
+              />
+            </>
           )}
-        </>
+        </div>
       )}
     </div>
   );

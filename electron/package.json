@@ -1,0 +1,60 @@
+{
+  "name": "school-management-desktop",
+  "version": "1.0.0",
+  "description": "Offline-first School Management System Desktop App",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "keygen": "node keygen.js",
+    "pack:win": "electron-builder --win --x64"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.2",
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "com.ranjha5213.schoolmanagement",
+    "productName": "School Management System",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "asar": true,
+    "asarUnpack": [
+      "../backend/migrations/**",
+      "../backend/schema.sql",
+      "**/*.node"
+    ],
+    "files": [
+      "main.js",
+      "preload.js",
+      "license.js",
+      "activation.html",
+      "package.json",
+      "../backend/**/*",
+      "!../backend/node_modules/**/{test,tests,__tests__,docs,example,examples,*.md}",
+      "../frontend/dist/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
+  }
+}
+
